@@ -1,1 +1,0 @@
-data_raw = "forecasting_pca/data/raw"
