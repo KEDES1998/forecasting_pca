@@ -3,8 +3,8 @@ import pandas as pd
 import os
 from pathlib import Path
 import matplotlib.pyplot as plt
-
-from requests import delete
+from statsmodels.tsa.stattools import adfuller
+from statsmodels.tsa.seasonal import STL
 
 # In[2] Path
 
@@ -57,25 +57,85 @@ df["date_parsed"] = pd.to_datetime(df["date_parsed"], format="%Y Q%q")
 
 # In[8] GDP-Plot
 
-plt.plot(df['date_parsed'], df['gdp'])
+fig, axs = plt.subplots(4, 1, figsize=(10, 12), sharex=True)
+
+axs[0].plot(df["date_parsed"], df["gdp"])
+axs[0].set_title("GDP")
+
+axs[1].plot(df["date_parsed"], df["cpi"])
+axs[1].set_title("CPI")
+
+axs[2].plot(df["date_parsed"], df["srate"])
+axs[2].set_title("Short-Term Interest Rate")
+
+axs[3].plot(df["date_parsed"], df["lrate"])
+axs[3].set_title("Long-Term Interest Rate")
+
+plt.tight_layout()
 plt.show()
 
-# In[9] CPI-Plot
+# In[9] Statiobarity testing (ADFuller)
 
-plt.plot(df['date_parsed'], df['cpi'])
-plt.show()
+def adf_test(series, name=''):
+    result = adfuller(series.dropna())
+    print(f'{name}: ADF={result[0]:.3f}, p-value={result[1]:.3f}')
 
-# In[10] Short-term interest rate Plot
+for col in ["gdp", "cpi", "srate", "lrate"]:
+    adf_test(df[col], name=col)
 
-plt.plot(df['date_parsed'], df['srate'])
-plt.show()
+# In[10]
 
-# In[11] Long-term interest rate Plot
+df_diff = df.copy()
 
-plt.plot(df['date_parsed'], df['lrate'])
-plt.show()
+for col in ["gdp", "cpi", "lrate"]:
+    df_diff[col + "_diff"] = df[col].diff()
+
+
+# In[11]
+
+for col in ["gdp_diff", "cpi_diff", "srate", "lrate_diff"]:
+    adf_test(df_diff[col], name=col)
 
 # In[12]
+
+for col in ["gdp_diff", "cpi_diff", "srate", "lrate_diff"]:
+    series = df_diff[col].dropna()
+    stl = STL(series, period=4)  # quartalsweise Daten
+    result = stl.fit()
+
+    result.plot()
+    plt.show()
+
+
+# gdp_diff: Only "stronger" seasonal oscillation towards the end -> no seasonal correction needed
+# cpi_diff: so clear seasonal pattern visible -> no seasonal correction needed
+# srate:    no clear seasonal oscillation visible, only varying oscillation in the timeframe
+# lrate_diff: shows pattern of a seasonal pattern -> needs seasonal adjustment
+
+
+# In[13]
+
+series = df_diff['lrate_diff'].dropna()
+stl = STL(series, period=4)
+result = stl.fit()
+df_diff['lrate_adj'] = series - result.seasonal
+
+# In[14]
+df_diff.rename(columns={"gdp_diff": "gdp_adj", "srate": "srate_adj", "cpi_diff": "cpi_adj"}, inplace=True)
+
+"""SUMMARY
+
+CPI : Differantiated
+
+GDP : Differantiated
+
+LRate : Differantiated + Seasonaly adjusted
+
+SRate : -
+
+"""
+
+# In[15]
 
 processed_file = processed_folder / "cleaned_macro_series.xlsx"
 processed_file_pkl = processed_folder / "cleaned_macro_series.pkl"
@@ -85,5 +145,13 @@ df.to_excel(processed_file, index=False)
 df.to_pickle(processed_file_pkl)
 
 print(f"Processed DataFrame saved to {processed_folder}")
+
+# In[]
+
+# In[]
+
+# In[]
+
+# In[]
 
 # In[]
