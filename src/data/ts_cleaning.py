@@ -141,8 +141,8 @@ processed_file = processed_folder / "cleaned_macro_series.xlsx"
 processed_file_pkl = processed_folder / "cleaned_macro_series.pkl"
 
 
-df.to_excel(processed_file, index=False)
-df.to_pickle(processed_file_pkl)
+df_diff.to_excel(processed_file, index=False)
+df_diff.to_pickle(processed_file_pkl)
 
 print(f"Processed DataFrame saved to {processed_folder}")
 
