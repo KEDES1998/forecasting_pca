@@ -317,7 +317,7 @@ plt.legend()
 plt.tight_layout()
 plt.show()
 
-#In[] Heat map
+# In[] Heat map
 # Beispiel: Zeige die ersten 10 Hauptkomponenten
 num_pcs_to_plot = 10
 fig, ax = plt.subplots(figsize=(12, 8))
