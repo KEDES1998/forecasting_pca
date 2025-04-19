@@ -4,3 +4,4 @@ matplotlib==3.10.1
 openpyxl==3.1.5
 scikit-learn
 statsmodels
+
