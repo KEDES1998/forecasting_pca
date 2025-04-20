@@ -18,7 +18,7 @@ df = pd.read_pickle(processed_file)
 # In[] Probe PCA
 
 # Abhängige Variablen definieren
-dependent_vars = ["gdp_diff", "lrate_diff", "srate", "cpi_diff"]
+dependent_vars = ["gdp", "lrate", "srate", "cpi"]
 
 # Unabhängige Spalten (alle numerischen, außer den abhängigen und 'date_parsed')
 X_cols = [col for col in df.columns if col not in dependent_vars + ["date_parsed"]]
