@@ -8,7 +8,7 @@ import numpy as np
 
 # In[Paths]
 
-project_root = Path().resolve()
+project_root = Path().resolve().parent
 print(f"Projektroot: {project_root}")
 
 processed_folder = project_root / "data" / "processed"
@@ -169,7 +169,7 @@ plt.show()
 
 
 # In[3D PCA plot]
-eigenvectors = pd.DataFrame({
+eigenvectors_3d = pd.DataFrame({
     "PC1": np.random.rand(100),
     "PC2": np.random.rand(100),
     "PC3": np.random.rand(100)
@@ -179,9 +179,9 @@ fig = plt.figure(figsize=(12, 8))
 ax = fig.add_subplot(111, projection='3d')
 
 # Daten aus den Eigenvektoren abrufen
-pc1 = eigenvectors.loc[:, "PC1"]
-pc2 = eigenvectors.loc[:, "PC2"]
-pc3 = eigenvectors.loc[:, "PC3"]
+pc1 = eigenvectors_3d.loc[:, "PC1"]
+pc2 = eigenvectors_3d.loc[:, "PC2"]
+pc3 = eigenvectors_3d.loc[:, "PC3"]
 
 # Farbwert basierend auf einer Komponente (z. B. PC1)
 colors = pc1
