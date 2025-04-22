@@ -1,6 +1,7 @@
 import pandas as pd
 from pathlib import Path
 import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
 import numpy as np
@@ -165,3 +166,53 @@ fig.colorbar(cax, ax=ax)
 plt.title("Heatmap der absoluten Ladungen (PC1–PC4, sortiert nach Einfluss)")
 plt.tight_layout()
 plt.show()
+
+
+# In[3D PCA plot]
+eigenvectors = pd.DataFrame({
+    "PC1": np.random.rand(100),
+    "PC2": np.random.rand(100),
+    "PC3": np.random.rand(100)
+})
+
+fig = plt.figure(figsize=(12, 8))
+ax = fig.add_subplot(111, projection='3d')
+
+# Daten aus den Eigenvektoren abrufen
+pc1 = eigenvectors.loc[:, "PC1"]
+pc2 = eigenvectors.loc[:, "PC2"]
+pc3 = eigenvectors.loc[:, "PC3"]
+
+# Farbwert basierend auf einer Komponente (z. B. PC1)
+colors = pc1
+
+# Scatterplot mit Farbgradient
+scatter = ax.scatter(
+    pc1, pc2, pc3,
+    c=colors, cmap="viridis", s=60, alpha=0.8, edgecolors="w", linewidth=0.5
+)
+
+# Farbskala hinzufügen
+cbar = fig.colorbar(scatter, ax=ax, pad=0.2)
+cbar.set_label("Farbskalierung: PC1", fontsize=12)
+
+# Achsentitel mit verbessertem Textstil
+ax.set_title("3D-Scatterplot der ersten 3 Hauptkomponenten", fontsize=16, weight='bold', pad=20)
+ax.set_xlabel("PC1", fontsize=12, labelpad=10)
+ax.set_ylabel("PC2", fontsize=12, labelpad=10)
+ax.set_zlabel("PC3", fontsize=12, labelpad=10)
+
+# Anpassung des Hintergrunddesigns
+ax.xaxis.pane.fill = True
+ax.yaxis.pane.fill = True
+ax.zaxis.pane.fill = True
+ax.xaxis.pane.set_facecolor('#f0f0f0')
+ax.yaxis.pane.set_facecolor('#f0f0f0')
+ax.zaxis.pane.set_facecolor('#f0f0f0')
+
+# Gitter und Transparenz für angenehme Lesbarkeit
+ax.grid(color="gray", linestyle="--", linewidth=0.5, alpha=0.7)
+
+plt.show()
+
+
