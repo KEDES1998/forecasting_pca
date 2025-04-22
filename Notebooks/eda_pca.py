@@ -5,9 +5,9 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
 import numpy as np
 
-# In[]
+# In[Paths]
 
-project_root = Path().resolve().parent
+project_root = Path().resolve()
 print(f"Projektroot: {project_root}")
 
 processed_folder = project_root / "data" / "processed"
@@ -15,16 +15,23 @@ processed_file = processed_folder / "cleaned_macro_series2.pkl"
 
 df = pd.read_pickle(processed_file)
 
-# In[] Probe PCA
 
-# Abhängige Variablen definieren
-dependent_vars = ["gdp", "lrate", "srate", "cpi"]
+# In[Column selection/exclusion]
 
-# Unabhängige Spalten (alle numerischen, außer den abhängigen und 'date_parsed')
-X_cols = [col for col in df.columns if col not in dependent_vars + ["date_parsed"]]
+exclude_cols = {"year", "month", "quarter", "date", "date_parsed", "ngdp",
+                "gdp_prod", "ngdpos", "ngdp", "pgdp", "gdpoi", "gdpos"}
+
+relevant_cols = [col for col in df.columns if col not in exclude_cols]
+
+
+# In[Probe PCA]
+
+is_relevant_col = lambda col: col in relevant_cols
+
+X_cols = [col for col in df.columns if is_relevant_col(col)]
 
 # Daten für PCA vorbereiten
-X = df[X_cols].dropna()
+X = df[X_cols]
 X_std = StandardScaler().fit_transform(X)
 
 # PCA durchführen
@@ -33,7 +40,7 @@ pca.fit(X_std)
 
 # Eigenvektoren als DataFrame
 eigenvectors = pd.DataFrame(pca.components_, columns=X.columns)
-eigenvectors.index = [f"PC{i+1}" for i in range(len(eigenvectors))]
+eigenvectors.index = [f"PC{i + 1}" for i in range(len(eigenvectors))]
 
 print("Erklärte Varianz je Komponente:")
 print(pca.explained_variance_ratio_)
@@ -47,9 +54,8 @@ eigenvectors.to_excel(all_eigenvectors)
 all_eigenvectors_pkl = processed_folder / "eigenvectors_full.pkl"
 eigenvectors.to_pickle(all_eigenvectors_pkl)
 
+# In[Screeplot]
 
-#In[] Scree-Plot
-# Scree-Plot: Erklärte Varianz der ersten 10 Hauptkomponenten
 explained_variance = pca.explained_variance_ratio_[:10]
 
 plt.figure(figsize=(10, 5))
@@ -61,7 +67,36 @@ plt.xticks(range(1, 11))
 plt.tight_layout()
 plt.show()
 
-# In[] PC1 Zeitverlauf zeichnen
+# Plot CDF of explained variance
+cumulative_variance = np.cumsum(pca.explained_variance_ratio_)
+
+
+# In[Eigenvalue CDF's]
+
+plt.figure(figsize=(10, 5))
+plt.plot(range(1, len(cumulative_variance) + 1), cumulative_variance, marker='o')
+plt.title("Kumulative erklärte Varianz der Hauptkomponenten")
+plt.xlabel("Hauptkomponenten")
+plt.ylabel("Kumulative erklärte Varianz")
+plt.grid(True)
+plt.tight_layout()
+plt.show()
+
+plt.figure(figsize=(10, 5))
+plt.plot(range(1, 21), cumulative_variance[:20], marker='o')
+plt.title("Kumulative erklärte Varianz der ersten 20 Hauptkomponenten")
+plt.xlabel("Hauptkomponenten")
+plt.ylabel("Kumulative erklärte Varianz")
+plt.xticks(range(1, 21))
+plt.grid(True)
+
+plt.text(0.95, -0.2, f"Kumulative erklärte Varianz der ersten 20 Komponenten: {cumulative_variance[19]:.3f}",
+         transform=plt.gca().transAxes, fontsize=10, ha='right')
+
+plt.tight_layout()
+plt.show()
+
+# In[PC1 Zeitverlauf]
 
 # Wandle den standardisierten Datensatz zurück in DataFrame mit Index
 X_pca = pca.transform(X_std)
@@ -78,9 +113,32 @@ plt.legend()
 plt.tight_layout()
 plt.show()
 
-# In[] Heat map
-# Anzahl der Hauptkomponenten und Variablen anzeigen
-num_pcs_to_plot = 4
+# In[Plot loadings]
+
+num_pcs_to_show = 3
+top_n = 10  # nur die Top-N Variablen pro PC
+
+for i in range(num_pcs_to_show):
+    component = eigenvectors.iloc[i]
+
+    # Top-N nach absolutem Wert
+    top_loadings = component.abs().sort_values(ascending=False).head(top_n)
+    top_vars = component.loc[top_loadings.index]  # originale Werte inkl. Vorzeichen
+
+    # Plot
+    plt.figure(figsize=(10, 5))
+    top_vars.plot(kind='bar')
+    plt.title(f"Top {top_n} Variablen in PC{i + 1}")
+    plt.ylabel("Ladung (Loading)")
+    plt.xlabel("Variable")
+    plt.xticks(rotation=45, ha='right')
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
+
+# In[Heat map]
+
+num_pcs_to_plot = 3
 
 # Absolute Werte der Ladungen
 eigenvectors_abs = eigenvectors.iloc[:num_pcs_to_plot].copy()
@@ -107,26 +165,3 @@ fig.colorbar(cax, ax=ax)
 plt.title("Heatmap der absoluten Ladungen (PC1–PC4, sortiert nach Einfluss)")
 plt.tight_layout()
 plt.show()
-
-# In[]
-
-num_pcs_to_show = 4
-top_n = 10  # nur die Top-N Variablen pro PC
-
-for i in range(num_pcs_to_show):
-    component = eigenvectors.iloc[i]
-
-    # Top-N nach absolutem Wert
-    top_loadings = component.abs().sort_values(ascending=False).head(top_n)
-    top_vars = component.loc[top_loadings.index]  # originale Werte inkl. Vorzeichen
-
-    # Plot
-    plt.figure(figsize=(10, 5))
-    top_vars.plot(kind='bar')
-    plt.title(f"Top {top_n} Variablen in PC{i + 1}")
-    plt.ylabel("Ladung (Loading)")
-    plt.xlabel("Variable")
-    plt.xticks(rotation=45, ha='right')
-    plt.grid(True)
-    plt.tight_layout()
-    plt.show()
