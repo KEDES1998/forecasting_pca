@@ -5,10 +5,13 @@ import matplotlib.pyplot as plt
 from statsmodels.tsa.stattools import adfuller
 from statsmodels.tsa.seasonal import STL
 
+# In[Train-Test]
+
+
 
 # In[Path]
 
-project_root = Path().resolve()
+project_root = Path().resolve().parent.parent
 print(f"Projektroot: {project_root}")
 raw_folder = project_root / "data" / "raw"
 raw_data = raw_folder / "Macro_series_FS25.xlsx"
@@ -285,7 +288,7 @@ for col in df_3.columns:
 processed_file2 = processed_folder / "cleaned_macro_series2.xlsx"
 processed_file2_pkl = processed_folder / "cleaned_macro_series2.pkl"
 
-
+df_3 = df_3.iloc[2:] # Because we differentiated twice -> won't have NaN's
 df_3.to_excel(processed_file2, index=False)
 df_3.to_pickle(processed_file2_pkl)
 
