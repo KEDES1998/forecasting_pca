@@ -5,6 +5,7 @@ from mpl_toolkits.mplot3d import Axes3D
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
 import numpy as np
+# In[Function]
 
 # In[Paths]
 
@@ -13,6 +14,9 @@ print(f"Projektroot: {project_root}")
 
 processed_folder = project_root / "data" / "processed"
 processed_file = processed_folder / "cleaned_macro_series2.pkl"
+input_excel = project_root / "data" / "processed" / "train_splits.xlsx"
+output_folder = project_root / "data" / "processed" / "pca_outputs"
+sheet_dict = pd.read_excel(input_excel, sheet_name=None)
 
 df = pd.read_pickle(processed_file)
 
@@ -215,4 +219,5 @@ ax.grid(color="gray", linestyle="--", linewidth=0.5, alpha=0.7)
 
 plt.show()
 
+# In[Schleife über alle Train-Excels]
 
