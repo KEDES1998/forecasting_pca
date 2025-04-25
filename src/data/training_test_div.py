@@ -12,6 +12,7 @@ print(f"Projektroot: {project_root}")
 
 processed_folder = project_root / "data" / "processed"
 processed_data = processed_folder / "cleaned_macro_series2.xlsx"
+save_path = processed_folder / "test_train"
 print(f"Processed Data Path: {processed_data}")
 
 df = pd.read_excel(processed_data)
@@ -55,12 +56,10 @@ for ratio in ratios:
 train_dfs[0.8]
 
 # In[Train-Test] Excel mit mehreren sheets
-# Speicherpfad korrekt setzen
-output_dir = Path("data/processed")
-output_dir.mkdir(parents=True, exist_ok=True)
 
-# ✅ 1. Excel mit mehreren Sheets (je Trainings-Ratio)
-excel_path = output_dir / "train_splits.xlsx"
+
+# Excel mit mehreren Sheets (je Trainings-Ratio)
+excel_path = save_path / "train_splits.xlsx"
 with pd.ExcelWriter(excel_path) as writer:
     for ratio, df in train_dfs.items():
         sheet_name = f"train_{str(ratio).replace('.', '_')}"
@@ -68,15 +67,15 @@ with pd.ExcelWriter(excel_path) as writer:
 
 print(f"Train-Excel-Datei gespeichert unter: {excel_path}")
 
-# ✅ 2. Pickle-Datei für schnellen Zugriff in Python
-pickle_path = output_dir / "train_dfs.pkl"
+
+pickle_path = save_path / "train_dfs.pkl"
 with open(pickle_path, "wb") as f:
     pickle.dump(train_dfs, f)
 
 print(f"Train-Pickle-Datei gespeichert unter: {pickle_path}")
 
-# ✅ 3. Excel-Datei mit mehreren Sheets (eine pro Test-Ratio)
-test_excel_path = output_dir / "test_splits.xlsx"
+# Excel-Datei mit mehreren Sheets (eine pro Test-Ratio)
+test_excel_path = save_path / "test_splits.xlsx"
 with pd.ExcelWriter(test_excel_path) as writer:
     for ratio, df in test_dfs.items():
         sheet_name = f"test_{str(ratio).replace('.', '_')}"
@@ -84,8 +83,8 @@ with pd.ExcelWriter(test_excel_path) as writer:
 
 print(f"Test-Excel-Datei gespeichert unter: {test_excel_path}")
 
-# ✅ 4. Pickle-Datei für schnellen Zugriff in Python
-test_pickle_path = output_dir / "test_dfs.pkl"
+
+test_pickle_path = save_path / "test_dfs.pkl"
 with open(test_pickle_path, "wb") as f:
     pickle.dump(test_dfs, f)
 
