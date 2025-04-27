@@ -7,11 +7,11 @@ from sklearn.decomposition import PCA
 import numpy as np
 
 # In[Setup]
-project_root = Path().resolve().parent
+project_root = Path().resolve()
 print(f"Projektroot: {project_root}")
 
 processed_folder = project_root / "data" / "processed"
-input_excel = processed_folder / "train_splits.xlsx"
+input_excel = processed_folder / "test_train" /"train_splits.xlsx"
 output_folder = processed_folder / "pca_outputs"
 output_folder.mkdir(exist_ok=True)
 
@@ -154,15 +154,3 @@ for sheet_name, df in sheet_dict.items():
 
 print("\nAlle Sheets erfolgreich analysiert.")
 
-# In[Funktion zum Abruf eines durchlaufs]
-def get_pca_result_by_sheet(sheet_name):
-
-    result = pca_results.get(sheet_name)
-    if result is None:
-        print(f"Kein Ergebnis für Sheet '{sheet_name}' gefunden.")
-        return None
-    return result
-
-# In[Abruf]
-
-get_pca_result_by_sheet("train_0_3")
