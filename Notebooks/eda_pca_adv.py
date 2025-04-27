@@ -19,7 +19,7 @@ sheet_dict = pd.read_excel(input_excel, sheet_name=None)
 pca_results = {}
 # In[Loop über alle Sheets]
 for sheet_name, df in sheet_dict.items():
-    print(f"\n🔁 Verarbeite Sheet: {sheet_name}")
+    print(f"\n Verarbeite Sheet: {sheet_name}")
 
     exclude_cols = {"year", "month", "quarter", "date", "date_parsed", "ngdp",
                     "gdp_prod", "ngdpos", "pgdp", "gdpoi", "gdpos"}
@@ -152,14 +152,14 @@ for sheet_name, df in sheet_dict.items():
         "df_raw": df,
     }
 
-print("\n✅ Alle Sheets erfolgreich analysiert.")
+print("\nAlle Sheets erfolgreich analysiert.")
 
 # In[Funktion zum Abruf eines durchlaufs]
 def get_pca_result_by_sheet(sheet_name):
 
     result = pca_results.get(sheet_name)
     if result is None:
-        print(f"❌ Kein Ergebnis für Sheet '{sheet_name}' gefunden.")
+        print(f"Kein Ergebnis für Sheet '{sheet_name}' gefunden.")
         return None
     return result
 
