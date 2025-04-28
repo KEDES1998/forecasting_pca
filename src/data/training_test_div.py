@@ -33,7 +33,7 @@ def split_time_series(df: pd.DataFrame, date_col: str = "date_parsed", train_rat
 
 # In[Train-Test] Schlaufe über Funktion mit 0.025er Schritten
 
-ratios = np.arange(0.2, 0.8, 0.025)
+ratios = np.arange(0.2, 0.8, 0.05)
 ratios = [round(r, 3) for r in ratios]
 
 train_dfs = {}
