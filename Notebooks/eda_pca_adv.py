@@ -5,6 +5,7 @@ from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
 import numpy as np
+import joblib
 
 # In[Setup]
 project_root = Path().resolve().parent
@@ -38,6 +39,12 @@ for sheet_name, df in sheet_dict.items():
     relevant_cols = [col for col in df.columns if col not in exclude_cols]
     X = df[relevant_cols]
     X_std = StandardScaler().fit_transform(X)
+
+    # StandardScaler speichern
+    scaler = StandardScaler()
+    X_std = scaler.fit_transform(X)
+    scaler_path = output_folder_pca / f"scaler_{sheet_name}.pkl"
+    joblib.dump(scaler, scaler_path)
 
     # PCA
     pca = PCA()
