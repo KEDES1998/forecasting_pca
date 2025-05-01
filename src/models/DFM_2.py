@@ -9,10 +9,10 @@ import matplotlib.pyplot as plt
 from sklearn.metrics import mean_squared_error
 
 # In[Setting Parameters]
-SPLIT_PARAM = "0_8"
+SPLIT_PARAM = "0_3"
 
 # In[Setting Path's]
-project_root = Path().resolve()
+project_root = Path().resolve().parent.parent
 processed_folder = project_root / "data" / "processed"
 data_train_path = processed_folder / "test_train" / "train_splits.xlsx"
 data_test_path = processed_folder / "test_train" / "test_splits.xlsx"
@@ -20,8 +20,8 @@ pca_path = processed_folder / "pca_outputs" / f"eigenvectors_train_{SPLIT_PARAM}
 scaler_path = processed_folder / "pca_outputs" / f"scaler_train_{SPLIT_PARAM}.pkl"
 
 results_path = project_root / "results"
-forecast_plot_folder = results_path / "figures"
-forecast_data_folder = results_path / "forecasts" / "forecast_data"
+forecast_plot_folder = results_path / "figures" /"forecast_plots" / f"{SPLIT_PARAM}"
+forecast_data_folder = results_path / "forecasts" / "forecast_data" /f"{SPLIT_PARAM}"
 forecast_plot_folder.mkdir(parents=True, exist_ok=True)
 forecast_data_folder.mkdir(parents=True, exist_ok=True)
 
@@ -83,7 +83,7 @@ for var in forecast_vars:
     plt.figure(figsize=(10, 4))
     plt.plot(date_index, actual, label=f"Actual {var.upper()}", color="black")
     plt.plot(date_index, forecasted, label=f"Forecast {var.upper()}", color="red")
-    plt.title(f"{var.upper()} Forecast – Top {n_top_pcs} PCs")
+    plt.title(f"{var.upper()} Forecast – Top {n_top_pcs} PCs {SPLIT_PARAM}")
     plt.xlabel("Datum")
     plt.ylabel(var.upper())
     plt.xticks(rotation=45)
@@ -91,7 +91,7 @@ for var in forecast_vars:
     plt.grid(True)
     plt.tight_layout()
 
-    plot_path = forecast_plot_folder / f"{var}_forecast_top{n_top_pcs}.png"
+    plot_path = forecast_plot_folder / f"{var}_forecast_top{n_top_pcs}_{SPLIT_PARAM}.png"
     plt.savefig(plot_path)
     plt.show()
 
@@ -100,13 +100,8 @@ for var in forecast_vars:
         "actual": actual,
         "forecast": forecasted
     })
-    forecast_df.to_pickle(forecast_data_folder / f"{var}_forecast_top{n_top_pcs}.pkl")
+    forecast_df.to_pickle(forecast_data_folder / f"{var}_forecast_top{n_top_pcs}_{SPLIT_PARAM}.pkl")
 
-    mse = mean_squared_error(actual, forecasted)
-    print(f"{var.upper()} – MSE: {mse:.4f} | Top PCs: {', '.join(important_pcs)}")
+    mse_pcas = mean_squared_error(actual, forecasted)
+    print(f"{var.upper()} – MSE: {mse_pcas:.4f} | Top PCs: {', '.join(important_pcs)}")
 
-# In[Forecast auf Level zurückbringen (GDP)]
-# === GDP-Level-Forecast rekonstruieren ===
-
-######
-#Habe ich noch nicht geschafft
