@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 from sklearn.metrics import mean_squared_error
 
 # In[Setting Parameters]
-SPLIT_PARAM = "0_3"
+SPLIT_PARAM = "0_8"
 
 # In[Setting Path's]
 project_root = Path().resolve()
