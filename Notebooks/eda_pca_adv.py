@@ -2,7 +2,6 @@ import pandas as pd
 from pathlib import Path
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
-from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
 import numpy as np
 import joblib
@@ -38,17 +37,10 @@ for sheet_name, df in sheet_dict.items():
                     "gdp_prod", "ngdpos", "pgdp", "gdpoi", "gdpos"}
     relevant_cols = [col for col in df.columns if col not in exclude_cols]
     X = df[relevant_cols]
-    X_std = StandardScaler().fit_transform(X)
-
-    # StandardScaler speichern
-    scaler = StandardScaler()
-    X_std = scaler.fit_transform(X)
-    scaler_path = output_folder_pca / f"scaler_{sheet_name}.pkl"
-    joblib.dump(scaler, scaler_path)
 
     # PCA
     pca = PCA()
-    pca.fit(X_std)
+    pca.fit(X)
 
     # Eigenvectors speichern
     eigenvectors = pd.DataFrame(pca.components_, columns=relevant_cols)
@@ -97,7 +89,7 @@ for sheet_name, df in sheet_dict.items():
     # PC1-Zeitreihe (falls Datum dabei ist)
     pc1_series = None
     if "date_parsed" in df.columns:
-        X_pca = pca.transform(X_std)
+        X_pca = pca.transform(X)
         pc1_series = pd.Series(X_pca[:, 0], index=df.dropna().loc[:, "date_parsed"])
         fig = plt.figure(figsize=(10, 4))
         plt.plot(pc1_series, label="PC1")

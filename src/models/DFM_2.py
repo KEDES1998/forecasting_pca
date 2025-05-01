@@ -28,60 +28,72 @@ forecast_data_folder.mkdir(parents=True, exist_ok=True)
 # In[Loading PCA + Scaler]
 eigen_full = pickle.load(open(pca_path, "rb"))
 eigenvectors = eigen_full.iloc[:20, :]
-scaler = joblib.load(scaler_path)
 
 # In[Loading Data]
 exclude_cols = {"year", "month", "quarter", "date", "date_parsed", "ngdp",
                 "gdp_prod", "ngdpos", "pgdp", "gdpoi", "gdpos"}
 
 df_train = pd.read_excel(data_train_path, sheet_name=f"train_{SPLIT_PARAM}")
-X_raw = df_train[[col for col in df_train.columns if col not in exclude_cols]]
+X_raw    = df_train[[c for c in df_train.columns if c not in exclude_cols]]
 
-df_test = pd.read_excel(data_test_path, sheet_name=f"test_{SPLIT_PARAM}")
-X_test = df_test[[col for col in df_test.columns if col not in exclude_cols]]
+df_test   = pd.read_excel(data_test_path, sheet_name=f"test_{SPLIT_PARAM}")
+X_test_df = df_test[[c for c in df_test.columns if c not in exclude_cols]]
 date_index = df_test["date_parsed"].values
 
-# In[Standardisierung]
-X = scaler.transform(X_raw)
+# Convert to NumPy arrays (already scaled)
+X_train_vals = X_raw.values
+X_test_vals  = X_test_df.values
 
 # In[Forecast je Zielvariable basierend auf wichtigsten PCs]
 forecast_vars = ["cpi", "gdp", "srate", "lrate"]
-n_top_pcs = 5
+n_top_pcs = 20
 all_forecasts = {}
 
 for var in forecast_vars:
-    important_pcs = eigenvectors[var].abs().sort_values(ascending=False).index[:n_top_pcs]
-    V = eigenvectors.loc[important_pcs]
+    # pick the most important PCs for this variable
+    important_pcs = (
+        eigenvectors[var]
+        .abs()
+        .sort_values(ascending=False)
+        .index[:n_top_pcs]
+    )
+    V = eigenvectors.loc[important_pcs]           # shape: (n_top_pcs, n_vars)
+    V_mat = V.values.T                             # shape: (n_vars, n_top_pcs)
 
-    factors_train = X @ V.T
-    factors_df = pd.DataFrame(factors_train)
+    # project train data onto these PCs
+    factors_train = X_train_vals @ V_mat           # shape: (n_train, n_top_pcs)
+    factors_df    = pd.DataFrame(factors_train)
 
-    model = VAR(factors_df)
+    # fit a VAR(1) on factors
+    model   = VAR(factors_df)
     results = model.fit(maxlags=1)
 
-    forecasted = []
-    actual = X_test[var].values
-    factors_history = factors_df.values.copy()
+    # prepare for recursive forecasting
+    forecasted      = []
+    actual          = X_test_df[var].values       # already scaled
+    factors_history = factors_train.copy()
 
-    for i in range(len(X_test)):
-        forecast = results.forecast(factors_history[-results.k_ar:], steps=1)
-        loading_vector = V[var].values
-        forecast_std = forecast @ loading_vector
+    for i in range(len(X_test_vals)):
+        # 1-step ahead forecast of factors
+        fcast = results.forecast(
+            factors_history[-results.k_ar :], steps=1
+        )  # shape (1, n_top_pcs)
 
-        col_idx = X_raw.columns.get_loc(var)
-        mean = scaler.mean_[col_idx]
-        scale = scaler.scale_[col_idx]
-        unscaled_value = forecast_std[0] * scale + mean
-        forecasted.append(unscaled_value)
+        # rebuild forecast of the target var via its loading vector
+        loading_vec = V[var].values                # length n_top_pcs
+        yhat_scaled = fcast @ loading_vec          # shape (1,)
+        forecasted.append(yhat_scaled[0])
 
-        new_x_scaled = scaler.transform(X_test.iloc[[i]])
-        new_factors = new_x_scaled @ V.T
+        # append the next actual factors to the history
+        new_x       = X_test_vals[[i]]             # shape (1, n_vars)
+        new_factors = new_x @ V_mat                # shape (1, n_top_pcs)
         factors_history = np.vstack([factors_history, new_factors])
 
     all_forecasts[var] = forecasted
 
+    # plot
     plt.figure(figsize=(10, 4))
-    plt.plot(date_index, actual, label=f"Actual {var.upper()}", color="black")
+    plt.plot(date_index, actual,    label=f"Actual {var.upper()}", color="black")
     plt.plot(date_index, forecasted, label=f"Forecast {var.upper()}", color="red")
     plt.title(f"{var.upper()} Forecast – Top {n_top_pcs} PCs {SPLIT_PARAM}")
     plt.xlabel("Datum")
@@ -91,17 +103,19 @@ for var in forecast_vars:
     plt.grid(True)
     plt.tight_layout()
 
-    plot_path = forecast_plot_folder / f"{var}_forecast_top{n_top_pcs}_{SPLIT_PARAM}.png"
+    # save figure
+    plot_path = Path(forecast_plot_folder) / f"{var}_forecast_top{n_top_pcs}_{SPLIT_PARAM}.png"
     plt.savefig(plot_path)
     plt.show()
 
+    # save forecast data
     forecast_df = pd.DataFrame({
-        "date": date_index,
-        "actual": actual,
-        "forecast": forecasted
+        "date":    date_index,
+        "actual":  actual,
+        "forecast":forecasted
     })
-    forecast_df.to_pickle(forecast_data_folder / f"{var}_forecast_top{n_top_pcs}_{SPLIT_PARAM}.pkl")
+    forecast_df.to_pickle(Path(forecast_data_folder) / f"{var}_forecast_top{n_top_pcs}_{SPLIT_PARAM}.pkl")
 
+    # performance
     mse_pcas = mean_squared_error(actual, forecasted)
     print(f"{var.upper()} – MSE: {mse_pcas:.4f} | Top PCs: {', '.join(important_pcs)}")
-
