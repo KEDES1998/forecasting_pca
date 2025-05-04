@@ -1,131 +1,127 @@
-# In[ IMPORT ]
-
+# === IMPORTS ===
 import pandas as pd
 import numpy as np
 from pathlib import Path
 from statsmodels.tsa.seasonal import STL
+import joblib
+import matplotlib.pyplot as plt
+from statsmodels.tsa.stattools import adfuller
 
-# In[=== 1 Pfade und Parameter ===]
-
+# === 1 Pfade & Parameter ===
+SPLIT_PARAM = "0_3"
 project_root = Path().resolve().parent.parent
 raw_folder = project_root / "data" / "raw"
+processed_folder = project_root / "data" / "processed"
 results_path = project_root / "results"
 
-raw_data_path = raw_folder / "Macro_series_FS25.xlsx"                  # Dein Original-Excel vor der Bereinigung
-processed_folder = project_root / "data" / "processed"                   # Enthält cleaned_macro_series2.xlsx
-forecast_data_folder = results_path / "forecasts" / "forecast_data"   # Enthält die *.pkl Forecast-Outputs
-output_file = results_path / "forecasts" / "forecast_data_transformed"  # Wo die finalen Werte hin sollen
+raw_data_path = raw_folder / "Macro_series_FS25.xlsx"
+forecast_data_folder = results_path / "forecasts" / "forecast_data" / SPLIT_PARAM
+output_file = results_path / "forecasts" / "forecast_data_transformed.csv"
+scaler_path = processed_folder / "pca_outputs" / "scaler_original.pkl"
 
-# Definiere hier, wie oft jede Variable differenziert wurde (d = 0,1 oder 2)
-diff_order = {"gdp":1, "cpi":1, "lrate": 1, "srate": 0}
+diff_order = {"gdp": 1, "cpi": 1, "lrate": 1, "srate": 0}
 
-
-# In[=== 2 Forecasts laden ===]
+# === 2 Scaler & Forecasts laden ===
+scaler = joblib.load(scaler_path)
+feature_names = list(scaler.feature_names_in_)
 
 all_forecasts = {}
 for var in diff_order.keys():
-    pkl = forecast_data_folder / f"{var}_forecast_top20.pkl"
-    df_fc = pd.read_pickle(pkl)
-
-    # 2) Spalte "date" in Pandas-Timestamps umwandeln
+    pkl_path = forecast_data_folder / f"{var}_forecast_top20_{SPLIT_PARAM}.pkl"
+    df_fc = pd.read_pickle(pkl_path)
     dates = pd.to_datetime(df_fc["date"])
-
-    # 3) Forecast-Werte als NumPy-Array extrahieren
     fvals = df_fc["forecast"].values
+    all_forecasts[var] = {"dates": dates, "forecast": fvals}
 
-    # 4) Im Dictionary speichern
-    all_forecasts[var] = {
-        "dates":   dates,
-        "forecast": fvals
-    }
-
-# In[=== 3 Den Vor-Processing-Pipeline rekonstruieren ===]
-
-# Wir laden noch einmal das Original und bauen df_3_input exakt so nach,
-
+# === 3 Originaldaten + Transformation wie in tscleaning ===
 df = pd.read_excel(raw_data_path)
 df.rename(columns={df.columns[0]: "date"}, inplace=True)
 df.drop(index=0, inplace=True)
+df[["year", "quarter"]] = df["date"].str.split(expand=True)
+df["year"] = df["year"].astype(int)
+df["month"] = df["quarter"].map({"Q1": 1, "Q2": 4, "Q3": 7, "Q4": 10})
+df["date_parsed"] = pd.to_datetime(df[["year", "month"]].assign(day=1))
+df.set_index("date_parsed", inplace=True)
 
-# Datum parsen
-df[["year","quarter"]] = df["date"].str.split(expand=True)
-df["year"]    = df["year"].astype(int)
-df["month"]   = df["quarter"].map({"Q1":1,"Q2":4,"Q3":7,"Q4":10})
-df["date_parsed"] = pd.to_datetime(df[["year","month"]].assign(day=1))
-
-# Numerics & NaN
-exclude = {"year","month","quarter","date","date_parsed"}
+exclude = {"year", "month", "quarter", "date", "date_parsed"}
 relevant = [c for c in df.columns if c not in exclude]
+df[relevant] = df[relevant].apply(pd.to_numeric, errors="coerce").ffill()
+
+df_std = df.copy()
 for c in relevant:
-    df[c] = pd.to_numeric(df[c], errors="coerce")
-    df[c].fillna(method="ffill", inplace=True)
+    df_std[c] = (df_std[c] - df_std[c].mean()) / df_std[c].std()
 
-# 1. Differenzierung für non_stationary1
-from statsmodels.tsa.stattools import adfuller
-def identify_ns(df, cols, alpha=0.05):
-    out = []
-    for c in cols:
-        p = adfuller(df[c].dropna())[1]
-        if p > alpha: out.append(c)
-    return out
-
-ns1 = identify_ns(df, relevant)
-df2 = df.copy()
+# === Differenzierungen ===
+ns1 = [c for c in relevant if adfuller(df_std[c].dropna())[1] > 0.05]
+df_diff1 = df_std.copy()
 for c in ns1:
-    df2[c] = df[c].diff()
+    df_diff1[c] = df_std[c].diff()
 
-# 2. Differenzierung für non_stationary2
-ns2 = identify_ns(df2, relevant)
-df3_input = df2.copy()
+ns2 = [c for c in relevant if adfuller(df_diff1[c].dropna())[1] > 0.05]
+df_diff2 = df_diff1.copy()
 for c in ns2:
-    df3_input[c] = df2[c].diff()
+    df_diff2[c] = df_diff1[c].diff()
 
-# 3. Saisonale Komponente aus df3_input extrahieren
+# 🔁 Speichere df_diff2 VOR STL zur Rücktransformation
+df_before_stl = df_diff2.copy()
+
+df_diff2 = df_diff2.iloc[2:]  # durch 2x diff
+df_before_stl = df_before_stl.iloc[2:]
+
+# === Saisonkomponenten mit STL ===
 seasonals = {}
 for c in relevant:
-    s = df3_input[c].dropna()
+    s = df_diff2[c].dropna()
     res = STL(s, period=4).fit()
     seasonals[c] = res.seasonal
 
-# 4. Aufräumen: die ersten 2 Zeilen fallen weg durch bis zu 2 diffs
-df3_input = df3_input.iloc[2:].set_index("date_parsed")
-
-
-# In[=== 4 Rücktransformation der Forecasts ===]
-
+# === 4 Rücktransformation Forecasts ===
 records = []
 for var, info in all_forecasts.items():
     dates = info["dates"]
-    fvals = np.array(info["forecast"])
+    fvals = info["forecast"]
     print(f"{var}: {np.isnan(fvals).sum()} NaNs im Forecast")
 
-    # 1) Saisonkomponente holen – OHNE reindex()
-    seas_vals = seasonals[var].values
-    if len(seas_vals) < 4:
-        raise ValueError(f"Nicht genug saisonale Werte für {var}")
-    last_four = seas_vals[-4:]
-
-    # 2) auf Forecast-Horizont ausdehnen
-    seas_fore = np.tile(last_four, int(np.ceil(len(fvals)/4)))[:len(fvals)]
+    # 1) Saisonkomponente hinzufügen (noch standardisiert!)
+    last_seasonals = seasonals[var].values[-4:]
+    seas_fore = np.tile(last_seasonals, int(np.ceil(len(fvals) / 4)))[:len(fvals)]
     y_diff2 = fvals + seas_fore
 
-    # 3) Differenzinvertierung
+    # 2) Differenzen rückrechnen (noch standardisiert!)
     d = diff_order[var]
-    if d > 0:
-        last_vals = df3_input[var].iloc[-d:].values
-        y_level = np.r_[last_vals, y_diff2].cumsum()[d:]
+    if d == 2:
+        last_vals = df_before_stl[var].iloc[-2:].values
+        y_level_std = np.r_[last_vals, y_diff2].cumsum()[2:]
+    elif d == 1:
+        last_val = df_before_stl[var].iloc[-1]
+        y_level_std = np.r_[last_val, y_diff2].cumsum()[1:]
     else:
-        y_level = y_diff2
+        y_level_std = y_diff2
 
-    if np.isnan(y_level).all():
-        print(f"Achtung: y_level für {var} ist immer noch komplett NaN!")
+    # 3) Entstandardisieren mit ORIGINAL-SCALER
+    dummy = np.zeros((len(y_level_std), len(feature_names)))
+    idx = feature_names.index(var)
+    dummy[:, idx] = y_level_std
+    y_level = scaler.inverse_transform(dummy)[:, idx]
+
+    # 4) Plot gegen echte Rohdaten
+    y_true = df[var]
+    plt.figure(figsize=(10, 4))
+    plt.plot(y_true.index, y_true, label=f"Original {var.upper()}", color="black")
+    plt.plot(dates, y_level, label=f"Forecast {var.upper()}", color="red")
+    plt.title(f"{var.upper()} – Forecast vs. Original")
+    plt.xlabel("Datum")
+    plt.ylabel(var.upper())
+    plt.xticks(rotation=45)
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
 
     for dt, y in zip(dates, y_level):
         records.append({"date": dt, "variable": var, "forecast_original": y})
 
-
-
-# 5) Ergebnis abspeichern
+# === 5 Exportieren ===
 df_out = pd.DataFrame.from_records(records)
 df_out.to_csv(output_file, index=False)
-print(f"Original-Einheiten Forecasts gespeichert in {output_file}")
+print(f"Forecasts in Original-Einheiten gespeichert unter: {output_file}")
