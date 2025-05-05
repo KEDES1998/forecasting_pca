@@ -24,7 +24,7 @@ pca_output_folder.mkdir(parents=True, exist_ok=True)
 ########################################
 
 # In[Rohdaten laden & vorbereiten]
-df_raw = pd.read_excel("/Users/Mshaise/Desktop/Office/forecasting_pca/data/raw/Macro_series_FS25.xlsx")
+df_raw = pd.read_excel(raw_data)
 df_raw.rename(columns={df_raw.columns[0]: "date"}, inplace=True)
 df_raw.drop(index=0, inplace=True)
 df_raw[["year", "quarter"]] = df_raw["date"].str.split(expand=True)
