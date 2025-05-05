@@ -16,14 +16,11 @@ project_root = Path().resolve().parent.parent
 raw_folder = project_root / "data" / "raw"
 raw_data = raw_folder / "Macro_series_FS25.xlsx"
 processed_folder = project_root / "data" / "processed"
-pca_output_folder = processed_folder / "pca_outputs"
 
 scaler_path_original = processed_folder / "scaler_original.pkl"
 scaler_path_transformed = processed_folder / "scaler_transformed.pkl"
 
 seasonal_path = processed_folder / "seasonal_components.pkl"
-
-pca_output_folder.mkdir(parents=True, exist_ok=True)
 
 ########################################
 ##########     RAW DATA LOAD    ########
