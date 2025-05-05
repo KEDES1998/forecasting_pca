@@ -104,7 +104,7 @@ for var in forecast_vars:
     plt.tight_layout()
 
     # save figure
-    plot_path = Path(forecast_plot_folder) / f"{var}_forecast_top{n_top_pcs}_{SPLIT_PARAM}.png"
+    plot_path = Path(forecast_plot_folder) / f"{var}_forecast_top_{SPLIT_PARAM}.png"
     plt.savefig(plot_path)
     plt.show()
 
@@ -114,7 +114,7 @@ for var in forecast_vars:
         "actual":  actual,
         "forecast":forecasted
     })
-    forecast_df.to_pickle(Path(forecast_data_folder) / f"{var}_forecast_top{n_top_pcs}_{SPLIT_PARAM}.pkl")
+    forecast_df.to_pickle(Path(forecast_data_folder) / f"{var}_forecast_{SPLIT_PARAM}.pkl")
 
     # performance
     mse_pcas = mean_squared_error(actual, forecasted)

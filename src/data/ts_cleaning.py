@@ -17,6 +17,12 @@ raw_folder = project_root / "data" / "raw"
 raw_data = raw_folder / "Macro_series_FS25.xlsx"
 processed_folder = project_root / "data" / "processed"
 pca_output_folder = processed_folder / "pca_outputs"
+
+scaler_path_original = processed_folder / "scaler_original.pkl"
+scaler_path_transformed = processed_folder / "scaler_transformed.pkl"
+
+seasonal_path = processed_folder / "seasonal_components.pkl"
+
 pca_output_folder.mkdir(parents=True, exist_ok=True)
 
 ########################################
@@ -46,7 +52,6 @@ df_raw[relevant_cols] = df_raw[relevant_cols].ffill()
 # In[Originalscaler speichern]
 scaler_original = StandardScaler()
 scaler_original.fit(df_raw[relevant_cols])
-scaler_path_original = pca_output_folder / "scaler_original.pkl"
 joblib.dump(scaler_original, scaler_path_original)
 print(f"Original-Scaler gespeichert unter {scaler_path_original}")
 
@@ -76,13 +81,19 @@ for col in non_stationary2:
 
 df_3 = df_3.iloc[2:]  # wegen zwei Differenzierungen
 
-# In[Saisonalität entfernen]
+# In[Saisonale Komponente berechnen & speichern]
+seasonals = pd.DataFrame(index=df_3.index)
+
 for col in df_3.columns:
     if col not in exclude_cols:
         series = df_3[col].dropna()
         res = STL(series, period=4).fit()
-        df_3[col] = series - res.seasonal
+        seasonal = res.seasonal
+        df_3.loc[seasonal.index, col] = series - seasonal
+        seasonals[col] = seasonal
 
+seasonals.to_pickle(seasonal_path)
+print(f"Saisonale Komponenten gespeichert unter {seasonal_path}")
 ########################################
 ##########     SPEICHERN       #########
 ########################################
@@ -100,6 +111,5 @@ df_3.to_pickle(processed_file_pkl)
 # In[Skalierer auf transformierten Daten speichern]
 scaler_transformed = StandardScaler()
 scaler_transformed.fit(df_3[relevant_cols])
-scaler_path_transformed = pca_output_folder / "scaler_transformed.pkl"
 joblib.dump(scaler_transformed, scaler_path_transformed)
 print(f"Transformierter Scaler gespeichert unter {scaler_path_transformed}")
