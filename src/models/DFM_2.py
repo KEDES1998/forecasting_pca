@@ -104,7 +104,7 @@ for var in forecast_vars:
     plt.tight_layout()
 
     # save figure
-    plot_path = Path(forecast_plot_folder) / f"{var}_forecast_top_{SPLIT_PARAM}.png"
+    plot_path = Path(forecast_plot_folder) / f"{var}_forecast_{SPLIT_PARAM}.png"
     plt.savefig(plot_path)
     plt.show()
 
