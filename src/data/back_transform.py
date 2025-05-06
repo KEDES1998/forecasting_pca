@@ -1,129 +1,116 @@
-# In[Imports]
+#!/usr/bin/env python3
+# back_transform.py
 
 import pandas as pd
 import numpy as np
-from pathlib import Path
-
-from matplotlib.pyplot import figure
-from statsmodels.tsa.seasonal import STL
 import joblib
+import json
 import matplotlib.pyplot as plt
-from statsmodels.tsa.stattools import adfuller
+from pathlib import Path
+from statsmodels.tsa.seasonal import STL
 
-# In[Parameters]
-SPLIT_PARAM = "0_3"
-diff_order = {"gdp": 1, "cpi": 1, "lrate": 1, "srate": 0}
+# 1) Paths & parameters
+# ---------------------
+project_root = Path().resolve().parent.parent
+raw_path       = project_root / "data" / "raw" / "Macro_series_FS25.xlsx"
+processed      = project_root / "data" / "processed"
+results        = project_root / "results"
+SPLIT_PARAM    = "0_8"
 
-# In[Paths]
-
-project_root         = Path().resolve().parent.parent
-raw_folder           = project_root / "data" / "raw"
-processed_folder     = project_root / "data" / "processed"
-results_path         = project_root / "results"
-
-# inputs
-raw_data_path        = raw_folder / "Macro_series_FS25.xlsx"
-cleaned_path         = processed_folder / "cleaned_macro_series2.xlsx"
-forecast_data_folder = results_path / "forecasts" / "forecast_data" / SPLIT_PARAM
-scaler_path          = processed_folder  / "scaler_original.pkl"
-seasonal_path        = processed_folder / "seasonal_components.pkl"
-
-# outputs
-output_data_folder   = results_path / "forecasts" / "forecast_data" / f"{SPLIT_PARAM}_orig"
-output_plot_folder   = results_path / "figures"   / "forecast_plots"   / f"{SPLIT_PARAM}_orig"
-output_data_folder.mkdir(parents=True, exist_ok=True)
-output_plot_folder.mkdir(parents=True, exist_ok=True)
-
-
-
-# In[ raw series (for inverting differencing & seasonality)]
-# df_raw.drop(index=0, inplace=True)
-
-df_raw = pd.read_excel(raw_data_path)
+# --- Load raw data and parse dates (same as your cleaning script) ---
+df_raw = pd.read_excel(raw_path)
 df_raw.rename(columns={df_raw.columns[0]: "date"}, inplace=True)
 df_raw.drop(index=0, inplace=True)
-df_raw[["year", "quarter"]] = df_raw["date"].str.split(expand=True)
+df_raw[["year","quarter"]] = df_raw["date"].str.split(expand=True)
 df_raw["year"]  = df_raw["year"].astype(int)
-df_raw["month"] = df_raw["quarter"].map({"Q1":1, "Q2":4, "Q3":7, "Q4":10})
+df_raw["month"] = df_raw["quarter"].map({"Q1":1,"Q2":4,"Q3":7,"Q4":10})
 df_raw["date_parsed"] = pd.to_datetime(df_raw[["year","month"]].assign(day=1))
 df_raw.set_index("date_parsed", inplace=True)
+exclude = {"year","month","quarter","date","date_parsed"}
+relevant = [c for c in df_raw.columns if c not in exclude]
+df_raw[relevant] = df_raw[relevant].apply(pd.to_numeric, errors="coerce").ffill()
 
-df_cleaned = pd.read_excel(cleaned_path)
-df_cleaned["date_parsed"] = pd.to_datetime(df_cleaned["date_parsed"])
+# --- Compute (and cache) the raw-seasonal component via STL ---
+raw_seasonal = {}
+for v in relevant:
+    res = STL(df_raw[v], period=4).fit()
+    raw_seasonal[v] = res.seasonal
 
-# In[seasonal components]
-seasonals = pd.read_pickle(seasonal_path)
+# --- Load the last‐step (deseasoned+diffed+scaled) series & diff orders ---
+df_stat       = pd.read_pickle(processed/"cleaned_macro_series2.pkl")
+df_stat["date_parsed"] = pd.to_datetime(df_stat["date_parsed"])
+df_stat.set_index("date_parsed", inplace=True)
 
-# In[original scaler]
+# if you saved diff_order.json, load it; otherwise hard-code:
+diff_order_file = processed/"diff_order.json"
+if diff_order_file.exists():
+    diff_order = json.load(open(diff_order_file))
+else:
+    diff_order = {"gdp":1,"cpi":1,"lrate":1,"srate":0}
 
-scaler = joblib.load(scaler_path)
-feat_names = list(scaler.feature_names_in_)
-scale_      = scaler.scale_
-mean_       = scaler.mean_
+# --- Load the ORIGINAL scaler (on raw data!) ---
+orig_scaler = joblib.load(processed/"scaler_original.pkl")
+orig_feats  = list(orig_scaler.feature_names_in_)
+orig_scale  = orig_scaler.scale_
+orig_mean   = orig_scaler.mean_
 
-# ----------------------------------------
-# Back-transform each forecast
-# ----------------------------------------
-# In[Back-transform each forecast]
+# Prepare output folders
+forecast_in  = results/"forecasts"/"forecast_data"/SPLIT_PARAM
+forecast_out = results/"forecasts"/"forecast_data"/f"{SPLIT_PARAM}_orig"
+plot_out     = results/"figures"/"forecast_plots"/f"{SPLIT_PARAM}_orig"
+for d in (forecast_out, plot_out):
+    d.mkdir(exist_ok=True, parents=True)
 
-for var, dorder in diff_order.items():
-    # load forecasted (scaled & stationary & de-seasonalized)
-    df_fc = pd.read_pickle(forecast_data_folder / f"{var}_forecast_{SPLIT_PARAM}.pkl")
-    dates = pd.to_datetime(df_fc["date"])
-    y_scaled_fc = df_fc["forecast"].values
+# --- Back-transform loop ---
+for var, d in diff_order.items():
+    print(f"\n=== {var.upper()} ===")
+    # 1) load your PCA/VAR forecast (scaled+diffed+deseasoned)
+    df_fc  = pd.read_pickle(forecast_in/f"{var}_forecast_{SPLIT_PARAM}.pkl")
+    dates  = pd.to_datetime(df_fc["date"])
+    y_stat = df_fc["forecast"].to_numpy()
+    print(" raw y_stat (first 5):", y_stat[:5])
 
-    # 1) inverse standardization
-    idx = feat_names.index(var)
-    y_stat = y_scaled_fc * scale_[idx] + mean_[idx]
-    # now y_stat is the differenced & season-adjusted series
-
-    # 2) add back seasonal component
-    #    seasonal may have same index as df_3; ensure alignment
-    seasonal_vals = seasonals[var].reindex(dates).values
-    y_diff = y_stat + seasonal_vals
-
-    # 3) invert differencing
-    if dorder == 0:
-        y_orig = y_diff
-    elif dorder == 1:
-        # need last observed original value just before first forecast date
-        first_date = dates[0]
-        # assuming quarterly frequency: subtract 3 months
-        last_date = first_date - pd.DateOffset(months=3)
-        y_last    = df_raw[var].loc[last_date]
-        # cumulative sum of diffs + last observed value
-        y_orig = np.cumsum(y_diff) + y_last
+    # 2) invert differencing
+    if d > 0:
+        last_stat = df_stat[var].iloc[-1]
+        y_des     = last_stat + np.cumsum(y_stat)
+        print(" last_stat:", last_stat)
     else:
-        raise ValueError(f"Unsupported diff order {dorder} for variable {var}")
+        y_des = y_stat.copy()
+        print(" no differencing to invert")
+    print(" y_des (first 5):", y_des[:5])
 
-    # assemble DataFrame
+    # 3) invert ORIGINAL scaling (on raw data)
+    idx      = orig_feats.index(var)
+    y_deseas = y_des * orig_scale[idx] + orig_mean[idx]
+    print(f" y_deseas (first 5):", y_deseas[:5],
+          f"(scale={orig_scale[idx]:.4f}, mean={orig_mean[idx]:.4f})")
+
+    # 4) re-add the RAW seasonal component
+    svals  = raw_seasonal[var].reindex(dates).to_numpy()
+    print(" seasonals (first 5):", svals[:5])
+    y_orig = y_deseas + svals
+    print(" y_orig (first 5):", y_orig[:5])
+
+    # 5) save & plot against THE RAW actuals
     df_out = pd.DataFrame({
-        "date":    dates,
+        "date": dates,
         "forecast_orig": y_orig
     }).set_index("date")
+    df_out.to_pickle (forecast_out / f"{var}_forecast_{SPLIT_PARAM}_orig.pkl")
+    df_out.to_excel  (forecast_out / f"{var}_forecast_{SPLIT_PARAM}_orig.xlsx")
 
-    # 4) merge with actual original series for plotting/comparison
-    df_actual = df_raw[[var]].reindex(dates)
-    df_plot   = df_actual.rename(columns={var:"actual"}) \
-                  .join(df_out)
+    df_act  = df_raw[[var]].rename(columns={var:"actual"}).reindex(dates)
+    df_plot = df_act.join(df_out)
+    print(" df_plot head:\n", df_plot.head())
 
-    # 5) save back-transformed forecasts
-    df_out.to_pickle(output_data_folder / f"{var}_forecast_{SPLIT_PARAM}_orig.pkl")
-    df_out.to_excel  (output_data_folder / f"{var}_forecast_{SPLIT_PARAM}_orig.xlsx")
-
-    # 6) plot
     plt.figure(figsize=(10,4))
-    plt.plot(df_plot.index, df_plot["actual"], label=f"Actual {var.upper()}")
-    plt.plot(df_plot.index, df_plot["forecast_orig"],
-             linestyle="--", label=f"Forecast {var.upper()}")
-    plt.title(f"{var.upper()} Forecast Back-Transformed ({SPLIT_PARAM})")
-    plt.xlabel("Datum")
-    plt.ylabel(var.upper())
-    plt.xticks(rotation=45)
-    plt.legend()
-    plt.grid(True)
-    plt.tight_layout()
-    plt.savefig(output_plot_folder / f"{var}_forecast_{SPLIT_PARAM}_orig.png")
+    plt.plot(df_plot.index, df_plot["actual"],       label="Actual")
+    plt.plot(df_plot.index, df_plot["forecast_orig"],label="Forecast", ls="--")
+    plt.title(f"{var.upper()} Forecast (original scale)")
+    plt.xlabel("Date"); plt.ylabel(var.upper())
+    plt.legend(); plt.grid(True); plt.tight_layout()
+    plt.savefig(plot_out / f"{var}_forecast_{SPLIT_PARAM}_orig.png")
     plt.close()
 
-    print(f"[{var}] Back-transformed forecast saved and plotted.")
+    print(f"{var} done.")
