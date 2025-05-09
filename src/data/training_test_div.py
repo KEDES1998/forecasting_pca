@@ -11,11 +11,11 @@ project_root = Path().resolve().parent.parent
 print(f"Projektroot: {project_root}")
 
 processed_folder = project_root / "data" / "processed"
-processed_data = processed_folder / "cleaned_macro_series2.xlsx"
+processed_data = processed_folder / "cleaned_data.csv"
 save_path = processed_folder / "test_train"
 print(f"Processed Data Path: {processed_data}")
 
-df = pd.read_excel(processed_data)
+df = pd.read_csv(processed_data)
 
 # In[Train-Test] Funktion
 
