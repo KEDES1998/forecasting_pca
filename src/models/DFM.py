@@ -1,79 +1,88 @@
-# In[IMPORTS]
-import pickle
 import pandas as pd
 import numpy as np
-from statsmodels.tsa.api import VAR
+import matplotlib.pyplot as plt
+from statsmodels.tsa.statespace.dynamic_factor import DynamicFactor
+from sklearn.metrics import mean_squared_error, mean_absolute_error
 from pathlib import Path
 
-# In[Setting Parameters]
-
-SPLIT_PARAM = "0_3"
-
-# In[Setting Path's]
-
-project_root = Path().resolve()
+# In[===== 1) Parameter & Pfade =====]
+project_root = Path().resolve().parent.parent
 print(f"Projektroot: {project_root}")
-
 processed_folder = project_root / "data" / "processed"
-data_train_path = processed_folder / "test_train" / "train_splits.xlsx"
-data_test_path = processed_folder / "test_train" / "test_splits.xlsx"
-pca_path = processed_folder / "pca_outputs" / f"eigenvectors_train_{SPLIT_PARAM}.pkl"
-print(f"Data Path: & pca_path: {pca_path}")
+DATA_PATH = processed_folder / "cleaned_data.csv"
+HORIZON  = 8    # Forecast-Horizont in Quartalen
+K_FACTORS = 1   # Anzahl latenter Faktoren
+ORDER = 1       # Ordnung der AR-Dynamik im Faktor
+MAXITER = 1000  # Max. Iterationen im Fit
 
-results_path = processed_folder / "results"
-models_path = results_path/ "forecasts"
+# In[===== 2) Daten einlesen & vorbereiten =====]
+df = pd.read_csv(
+    DATA_PATH,
+    parse_dates=['date_parsed'],
+    index_col='date_parsed'
+)
 
-# In[Loading Data]
+# explizit Quartals-Anfang
+df = df.asfreq('QS')
 
-eigen_full = pickle.load(open(pca_path, "rb"))
-eigenvectors = eigen_full.iloc[:20, :] # Only the first 20 PCA's
+# Endogene Variablen auswählen und fehlende Zeilen entfernen
+endog = df[['inflation', 'g_gdpos', 'srate', 'lrate']].dropna()
 
-exclude_cols = {"year", "month", "quarter", "date", "date_parsed", "ngdp",
-                "gdp_prod", "ngdpos", "pgdp", "gdpoi", "gdpos"}
+# In[===== 3) Train/Test-Split =====]
+train = endog.iloc[:-HORIZON]
+test  = endog.iloc[-HORIZON:]
 
-X = pd.read_excel(data_train_path, sheet_name=f"train_{SPLIT_PARAM}")
+# In[===== 4) Modell fitting =====]
+mod    = DynamicFactor(train, k_factors=K_FACTORS, factor_order=ORDER)
+res    = mod.fit(maxiter=MAXITER, disp=False)
+print(res.summary())
 
-X = X[[col for col in X.columns if col not in exclude_cols]]
-
-X_test = pd.read_excel(data_test_path, sheet_name=f"test_{SPLIT_PARAM}")
-
-# In[De-Bug: Matrix-Multiplication consitency check (Dimensions)]
-
-print(f"X shape: {X.shape}")
-print(f"eigenvectors shape: {eigenvectors.T.shape}")
-print(f"eigenvectors FULL shape: {eigen_full.shape}")
-
-# In[Projection: factor  -> \]
-
-factors = X @ eigenvectors.T
-factors_df = pd.DataFrame(factors, index=X.index)
-
-# In[VAR(1) estimate]
-
-model = VAR(factors_df)
-results = model.fit(maxlags=1)
-
-# In[Forecast for next quarter]
-
-factors_forecast = results.forecast(factors_df.values[-results.k_ar:], steps=1)
-
-# In[Transformation into original "space"]
-
-predicted_X = factors_forecast @ eigenvectors
-predicted_X = pd.DataFrame(predicted_X, columns=X.columns)
-
-# In[Predictions]
-
-predicted_CPI = predicted_X['cpi'].values[0]
-predicted_GDP = predicted_X['gdp'].values[0]
-
-actual_CPI = X_test['cpi'].values[0]
-actual_GDP = X_test['gdp'].values[0]
-
-print(f"Predicted CPI next quarter:, {predicted_CPI} | Actual CPI next quarter:, {actual_CPI}")
-print(f"Predicted GDP next quarter:, {predicted_GDP} | Actual GDP next quarter:, {actual_GDP}")
-# In[]
+# In[===== 5) Forecast auf Test-Periode =====]
+fcast     = res.get_forecast(steps=HORIZON)
+pred_mean = fcast.predicted_mean
 
 
+ci = fcast.conf_int()
 
-# In[]
+flat_cols = []
+for col in ci.columns.to_flat_index():
+    if isinstance(col, tuple):
+        flat_cols.append("_".join(str(c) for c in col))
+    else:
+        flat_cols.append(str(col).replace(" ", "_"))
+ci.columns = flat_cols
+
+# In[===== 6) Forecast-Accuracy messen =====]
+metrics = pd.DataFrame(index=endog.columns, columns=['RMSE','MAE'])
+for var in endog.columns:
+    y_true = test[var]
+    y_pred = pred_mean[var]
+    metrics.loc[var, 'RMSE'] = np.sqrt(mean_squared_error(y_true, y_pred))
+    metrics.loc[var, 'MAE']  = mean_absolute_error(y_true, y_pred)
+
+print("\nForecast Accuracy (Test-Set):")
+print(metrics)
+
+# In[===== 7) Plots: Train vs Test vs Forecast =====]
+for var in endog.columns:
+    plt.figure(figsize=(10, 4))
+    plt.plot(train.index, train[var], label='Train (historic)')
+    plt.plot(test.index,  test[var],  label='Test (real)')
+    plt.plot(pred_mean.index, pred_mean[var], label='Forecast')
+    # falls CI-Spalten vorhanden sind:
+    lower_col = f'lower_{var}'
+    upper_col = f'upper_{var}'
+    if lower_col in ci.columns and upper_col in ci.columns:
+        plt.fill_between(
+            pred_mean.index,
+            ci[lower_col],
+            ci[upper_col],
+            color='gray', alpha=0.3,
+            label='95% CI'
+        )
+    plt.title(f'DFM Forecast vs. Reality for {var}')
+    plt.xlabel('Datum')
+    plt.ylabel(var)
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
