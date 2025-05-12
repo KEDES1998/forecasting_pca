@@ -123,6 +123,26 @@ y_ar_pred = model_ar1.predict(X_ar_full_clean)
 
 # Forecast-DataFrame kombinieren
 forecast_df["ar1_pred"] = y_ar_pred
+# In[===== Forecast auf vollen Zeitverlauf (AR2) =====]
+# AR(2): inflation_t ~ inflation_{t-1} + inflation_{t-2}
+X_ar2_full = pd.DataFrame()
+X_ar2_full["inflation_lag1"] = df_full["inflation"].shift(1)
+X_ar2_full["inflation_lag2"] = df_full["inflation"].shift(2)
+y_ar2_full = df_full["inflation"]
+
+# Gültige Beobachtungen auswählen
+valid_ar2 = X_ar2_full.notnull().all(axis=1) & y_ar2_full.notnull()
+X_ar2_clean = X_ar2_full[valid_ar2]
+y_ar2_clean = y_ar2_full[valid_ar2]
+
+# Modell schätzen
+model_ar2 = LinearRegression().fit(X_ar2_clean, y_ar2_clean)
+
+# Vorhersage erstellen
+y_ar2_pred = model_ar2.predict(X_ar2_clean)
+
+# Forecast-DataFrame sicher erweitern (mit Index-Ausrichtung)
+forecast_df.loc[X_ar2_clean.index, "ar2_pred"] = y_ar2_pred
 
 # In[===== Plot: Vergleich Forecast vs. AR(1) =====]
 plt.figure(figsize=(12, 5))
@@ -194,6 +214,9 @@ plt.plot(forecast_df.index, forecast_df["y_pred"], label="Predicted (PCs + y_{t-
 # AR(1)
 plt.plot(forecast_df.index, forecast_df["ar1_pred"], label="AR(1) Prediction", linestyle=":", color="blue")
 
+# AR(2)
+plt.plot(forecast_df.index, forecast_df["ar2_pred"], label="AR(2) Prediction", linestyle=":", color="purple")
+
 # Neues Modell: Für jedes i eigenes Modell mit y_{t-i}
 plt.plot(forecast_custom_df.index, forecast_custom_df["forecast_custom"], label="Forecast: y_t ~ PCs + y_{t-i}", linestyle="-.", color="green")
 
@@ -201,7 +224,7 @@ plt.plot(forecast_custom_df.index, forecast_custom_df["forecast_custom"], label=
 plt.axvline(x=split_timestamp, color="red", linestyle="dotted", label="Train/Test Split")
 
 # Formatierung
-plt.title("Forecast Comparison: AR(1), PCs + y_{t-1}, and Separate Models y_{t-i}")
+plt.title("Forecast Comparison: AR(1), AR(2), PCs + y_{t-1}, and Separate Models y_{t-i}")
 plt.xlabel("Zeit")
 plt.ylabel("Inflation")
 plt.legend()
