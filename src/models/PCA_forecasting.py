@@ -8,10 +8,10 @@ from sklearn.linear_model import LinearRegression
 
 
 # In[===== 1) Parameter & Pfade =====]
-project_root = Path().resolve()
+project_root = Path().resolve().parent.parent
 processed_folder = project_root / "data" / "processed" / "test_train"
-TRAIN_DATA_PATH = processed_folder / "train_splits.xlsx"
-TEST_DATA_PATH = processed_folder / "test_splits.xlsx"
+TRAIN_DATA_PATH = processed_folder / "train_splits_scaled.xlsx"
+TEST_DATA_PATH = processed_folder / "test_splits_scaled.xlsx"
 
 group_number = 0
 split_number = 5
@@ -35,7 +35,7 @@ df_test = pd.read_excel(
 
 split_timestamp = df_test.index.min()
 
-exclude_cols = {"year", "month", "quarter", "date", "date_parsed", "pgdpos", "pgdpoi"}
+exclude_cols = {"date_parsed"}
 relevant_cols = [col for col in df_train.columns if col not in exclude_cols]
 
 PCAdf_train = df_train[relevant_cols]
