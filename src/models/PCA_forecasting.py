@@ -5,13 +5,14 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 from sklearn.decomposition import PCA
 from sklearn.linear_model import LinearRegression
+from sklearn.preprocessing import StandardScaler
 
 
 # In[===== 1) Parameter & Pfade =====]
 project_root = Path().resolve().parent.parent
 processed_folder = project_root / "data" / "processed" / "test_train"
-TRAIN_DATA_PATH = processed_folder / "train_splits_scaled.xlsx"
-TEST_DATA_PATH = processed_folder / "test_splits_scaled.xlsx"
+TRAIN_DATA_PATH = processed_folder / "train_splits.xlsx"
+TEST_DATA_PATH = processed_folder / "test_splits.xlsx"
 
 group_number = 0
 split_number = 5
@@ -41,12 +42,16 @@ relevant_cols = [col for col in df_train.columns if col not in exclude_cols]
 PCAdf_train = df_train[relevant_cols]
 PCAdf_test = df_test[relevant_cols]
 
+scaler = StandardScaler()
+PCAdf_train_scaled = scaler.fit_transform(PCAdf_train.values)
+PCAdf_test_scaled  = scaler.transform(PCAdf_test.values)
+
 
 # In[===== PCA (nur auf Train) =====]
 n_components = min(20, PCAdf_train.shape[0], PCAdf_train.shape[1])
 pca = PCA(n_components=n_components, svd_solver="full")
-X_pca_train = pca.fit_transform(PCAdf_train.values)
-X_pca_test = pca.transform(PCAdf_test.values)
+X_pca_train = pca.fit_transform(PCAdf_train_scaled)
+X_pca_test  = pca.transform(PCAdf_test_scaled)
 
 X_pca_train_df = pd.DataFrame(X_pca_train, index=df_train.index, columns=[f"PC{i+1}" for i in range(n_components)])
 X_pca_test_df = pd.DataFrame(X_pca_test, index=df_test.index, columns=[f"PC{i+1}" for i in range(n_components)])
