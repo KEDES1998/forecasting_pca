@@ -106,257 +106,389 @@ plt.legend()
 plt.tight_layout()
 plt.show()
 
-# In[===== AR(1) Modell (nur Lag, keine PCs) =====]
-X_ar_train = pd.DataFrame()
-X_ar_train["inflation_lag1"] = df_train["inflation"].shift(1)
-y_ar_train = df_train["inflation"]
-valid_ar_train = X_ar_train.notnull().all(axis=1) & y_ar_train.notnull()
-X_ar_train_clean = X_ar_train[valid_ar_train]
-y_ar_train_clean = y_ar_train[valid_ar_train]
+# In[===== AR(1)/AR(2) Modell (nur Lag, keine PCs) =====]
+target_vars = ['inflation', 'g_gdpos', 'srate', 'lrate']
+ar_results = {}
 
-model_ar1 = LinearRegression()
-model_ar1.fit(X_ar_train_clean, y_ar_train_clean)
+for target_var in target_vars:
+    print(f"\n=== {target_var.upper()} ===")
 
-# In[===== Forecast auf vollen Zeitverlauf (AR1) =====]
-X_ar_full = pd.DataFrame()
-X_ar_full["inflation_lag1"] = df_full["inflation"].shift(1)
-y_ar_full = df_full["inflation"]
-valid_ar_full = X_ar_full.notnull().all(axis=1) & y_ar_full.notnull()
-X_ar_full_clean = X_ar_full[valid_ar_full]
-y_ar_full_clean = y_ar_full[valid_ar_full]
-y_ar_pred = model_ar1.predict(X_ar_full_clean)
+    # AR(1): Train
+    df_ar1 = pd.DataFrame()
+    df_ar1[f"{target_var}_lag1"] = df_train[target_var].shift(1)
+    df_ar1[target_var] = df_train[target_var]
+    df_ar1_clean = df_ar1.dropna()
+    X_ar1 = df_ar1_clean[[f"{target_var}_lag1"]]
+    y_ar1 = df_ar1_clean[target_var]
+    model_ar1 = LinearRegression().fit(X_ar1, y_ar1)
 
-# Forecast-DataFrame kombinieren
-forecast_df["ar1_pred"] = y_ar_pred
-# In[===== Forecast auf vollen Zeitverlauf (AR2) =====]
-# AR(2): inflation_t ~ inflation_{t-1} + inflation_{t-2}
-X_ar2_full = pd.DataFrame()
-X_ar2_full["inflation_lag1"] = df_full["inflation"].shift(1)
-X_ar2_full["inflation_lag2"] = df_full["inflation"].shift(2)
-y_ar2_full = df_full["inflation"]
+    # AR(2): Train
+    df_ar2 = pd.DataFrame()
+    df_ar2[f"{target_var}_lag1"] = df_train[target_var].shift(1)
+    df_ar2[f"{target_var}_lag2"] = df_train[target_var].shift(2)
+    df_ar2[target_var] = df_train[target_var]
+    df_ar2_clean = df_ar2.dropna()
+    X_ar2 = df_ar2_clean[[f"{target_var}_lag1", f"{target_var}_lag2"]]
+    y_ar2 = df_ar2_clean[target_var]
+    model_ar2 = LinearRegression().fit(X_ar2, y_ar2)
 
-# Gültige Beobachtungen auswählen
-valid_ar2 = X_ar2_full.notnull().all(axis=1) & y_ar2_full.notnull()
-X_ar2_clean = X_ar2_full[valid_ar2]
-y_ar2_clean = y_ar2_full[valid_ar2]
+    # AR(1): Forecast auf Testdaten
+    df_test_ar1 = pd.DataFrame()
+    df_test_ar1[f"{target_var}_lag1"] = df_full[target_var].shift(1)
+    df_test_ar1[target_var] = df_full[target_var]
+    df_test_ar1 = df_test_ar1.loc[df_test.index]
+    df_test_ar1_clean = df_test_ar1.dropna()
+    X_test_ar1 = df_test_ar1_clean[[f"{target_var}_lag1"]]
+    y_test_ar1 = df_test_ar1_clean[target_var]
+    y_pred_ar1 = model_ar1.predict(X_test_ar1)
+    mse_ar1 = mean_squared_error(y_test_ar1, y_pred_ar1)
 
-# Modell schätzen
-model_ar2 = LinearRegression().fit(X_ar2_clean, y_ar2_clean)
+    # AR(2): Forecast auf Testdaten
+    df_test_ar2 = pd.DataFrame()
+    df_test_ar2[f"{target_var}_lag1"] = df_full[target_var].shift(1)
+    df_test_ar2[f"{target_var}_lag2"] = df_full[target_var].shift(2)
+    df_test_ar2[target_var] = df_full[target_var]
+    df_test_ar2 = df_test_ar2.loc[df_test.index]
+    df_test_ar2_clean = df_test_ar2.dropna()
+    X_test_ar2 = df_test_ar2_clean[[f"{target_var}_lag1", f"{target_var}_lag2"]]
+    y_test_ar2 = df_test_ar2_clean[target_var]
+    y_pred_ar2 = model_ar2.predict(X_test_ar2)
+    mse_ar2 = mean_squared_error(y_test_ar2, y_pred_ar2)
 
-# Vorhersage erstellen
-y_ar2_pred = model_ar2.predict(X_ar2_clean)
+    # MSE-Ausgabe
+    print(f"MSE AR(1) (Test): {mse_ar1:.6f}")
+    print(f"MSE AR(2) (Test): {mse_ar2:.6f}")
 
-# Forecast-DataFrame sicher erweitern (mit Index-Ausrichtung)
-forecast_df.loc[X_ar2_clean.index, "ar2_pred"] = y_ar2_pred
+    # Speichern
+    ar_results[target_var] = {
+        "ar1": {"mse": mse_ar1, "y_true": y_test_ar1, "y_pred": y_pred_ar1, "index": X_test_ar1.index},
+        "ar2": {"mse": mse_ar2, "y_true": y_test_ar2, "y_pred": y_pred_ar2, "index": X_test_ar2.index}
+    }
 
-# In[===== Plot: Vergleich Forecast vs. AR(1) =====]
-plt.figure(figsize=(12, 5))
-plt.plot(forecast_df.index, forecast_df["y_true"], label="True Inflation", color="black")
-plt.plot(forecast_df.index, forecast_df["y_pred"], label="Predicted (PCs + Lag)", linestyle="--", color="orange")
-plt.plot(forecast_df.index, forecast_df["ar1_pred"], label="AR(1) Prediction", linestyle=":", color="blue")
-plt.axvline(x=split_timestamp, color="red", linestyle="dotted", label="Train/Test Split")
-plt.title("Forecast Comparison: PCs + Lag vs. AR(1)")
-plt.xlabel("Zeit")
-plt.ylabel("Inflation")
-plt.legend()
-plt.tight_layout()
-plt.show()
+    # Plot
+    plt.figure(figsize=(12, 5))
+    plt.plot(df_test.index, df_test[target_var], label="True Series", color="black")
+    plt.plot(X_test_ar1.index, y_pred_ar1, label=f"AR(1) | MSE={mse_ar1:.4f}", linestyle=":", color="blue")
+    plt.plot(X_test_ar2.index, y_pred_ar2, label=f"AR(2) | MSE={mse_ar2:.4f}", linestyle="--", color="purple")
+    plt.title(f"{target_var.upper()}: Forecast (Test) vs. True")
+    plt.xlabel("Zeit")
+    plt.ylabel(target_var)
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
+
 
 # In[===== Selektion Bestes Modell (Train) =====]
-# Parameter
-# Parameter
-target_var = "inflation"
+# Zielvariablen
+target_vars = ['inflation', 'g_gdpos', 'srate', 'lrate']
 max_lags = 5
-max_pcs =20
+max_pcs = 20
 
-# Vorbereitung
-results = []
-best_mse = float("inf")
-best_config = None
+final_forecasts = {}
 
-for n_lags in range(1, max_lags + 1):
-    for n_pcs in range(1, max_pcs + 1):
-        pc_cols = [f"PC{i + 1}" for i in range(n_pcs)]
-        df_pcs_full = pd.concat([X_pca_train_df[pc_cols], X_pca_test_df[pc_cols]])
-        df_target_full = pd.concat([df_train[target_var], df_test[target_var]])
-        horizon = len(df_test)
+for target_var in target_vars:
+    print(f"\n=== {target_var.upper()} ===")
 
-        preds, trues = [], []
+    # Grid Search zur Auswahl des besten Modells
+    best_mse = float("inf")
+    best_config = (None, None)
+    results = []
 
-        for i in range(1, horizon + 1):
-            features = []
+    for n_lags in range(1, max_lags + 1):
+        for n_pcs in range(1, max_pcs + 1):
+            pc_cols = [f"PC{i + 1}" for i in range(n_pcs)]
+            df_pcs_full = pd.concat([X_pca_train_df[pc_cols], X_pca_test_df[pc_cols]])
+            df_target_full = pd.concat([df_train[target_var], df_test[target_var]])
+            horizon = len(df_test)
 
-            for lag in range(1, n_lags + 1):
-                y_lag = df_target_full.shift(i + lag - 1).rename(f"{target_var}_lag{lag}")
-                pcs_lag = df_pcs_full[pc_cols].shift(i + lag - 1)
-                pcs_lag.columns = [f"{col}_lag{lag}" for col in pc_cols]
-                features.append(y_lag)
-                features.append(pcs_lag)
+            preds, trues = [], []
 
-            X_train = pd.concat(features, axis=1)
-            y_train = df_target_full
-
-            valid = X_train.notnull().all(axis=1) & y_train.notnull()
-            X_valid = X_train[valid]
-            y_valid = y_train[valid]
-
-            if len(X_valid) < 30:
-                continue
-
-            model = LinearRegression().fit(X_valid, y_valid)
-
-            # Forecast: y_{t+i} using info at t
-            try:
-                t_i = df_test.index[i - 1]
-                X_input = []
-
+            for i in range(1, horizon + 1):
+                features = []
                 for lag in range(1, n_lags + 1):
-                    lookup = t_i - pd.DateOffset(months=3 * (i + lag - 1))
-                    y_val = df_target_full.loc[lookup]
-                    pcs_val = df_pcs_full.loc[lookup, pc_cols]
-                    if pd.isna(y_val) or pcs_val.isna().any():
-                        raise ValueError
-                    X_input.append(y_val)
-                    X_input.extend(pcs_val.tolist())
+                    y_lag = df_target_full.shift(i + lag - 1).rename(f"{target_var}_lag{lag}")
+                    pcs_lag = df_pcs_full[pc_cols].shift(i + lag - 1)
+                    pcs_lag.columns = [f"{col}_lag{lag}" for col in pc_cols]
+                    features.append(y_lag)
+                    features.append(pcs_lag)
 
-                feature_names = [f"{target_var}_lag{l}" for l in range(1, n_lags + 1)]
-                for l in range(1, n_lags + 1):
-                    feature_names += [f"{pc}_lag{l}" for pc in pc_cols]
+                X_train = pd.concat(features, axis=1)
+                y_train = df_target_full
 
-                X_pred_df = pd.DataFrame([X_input], columns=feature_names)
-                y_hat = model.predict(X_pred_df)[0]
-                y_true = df_target_full.loc[t_i]
+                valid = X_train.notnull().all(axis=1) & y_train.notnull()
+                X_valid = X_train[valid]
+                y_valid = y_train[valid]
 
-                preds.append(y_hat)
-                trues.append(y_true)
+                if len(X_valid) < 30:
+                    continue
 
-            except:
-                continue
+                model = LinearRegression().fit(X_valid, y_valid)
 
-        if preds and len(preds) == len(trues):
-            mse = mean_squared_error(trues, preds)
-            results.append((n_lags, n_pcs, mse))
-            if mse < best_mse:
-                best_mse = mse
-                best_config = (n_lags, n_pcs)
+                try:
+                    t_i = df_test.index[i - 1]
+                    X_input = []
+                    for lag in range(1, n_lags + 1):
+                        lookup = t_i - pd.DateOffset(months=3 * (i + lag - 1))
+                        y_val = df_target_full.loc[lookup]
+                        pcs_val = df_pcs_full.loc[lookup, pc_cols]
+                        if pd.isna(y_val) or pcs_val.isna().any():
+                            raise ValueError
+                        X_input.append(y_val)
+                        X_input.extend(pcs_val.tolist())
 
-# Output
-print(f"Best MSE: {best_mse:.6f} at n_lags={best_config[0]}, n_pcs={best_config[1]}")
+                    feature_names = [f"{target_var}_lag{l}" for l in range(1, n_lags + 1)]
+                    for l in range(1, n_lags + 1):
+                        feature_names += [f"{pc}_lag{l}" for pc in pc_cols]
 
-results_df = pd.DataFrame(results, columns=["n_lags", "n_pcs", "mse"])
+                    X_pred_df = pd.DataFrame([X_input], columns=feature_names)
+                    y_hat = model.predict(X_pred_df)[0]
+                    y_true = df_target_full.loc[t_i]
+
+                    preds.append(y_hat)
+                    trues.append(y_true)
+
+                except:
+                    continue
+
+            if preds and len(preds) == len(trues):
+                mse = mean_squared_error(trues, preds)
+                results.append((n_lags, n_pcs, mse))
+                if mse < best_mse:
+                    best_mse = mse
+                    best_config = (n_lags, n_pcs)
+
+    # Bestes Modell ausgeben
+    best_n_lags, best_n_pcs = best_config
+    print(f"Best config: lags={best_n_lags}, pcs={best_n_pcs}, MSE={best_mse:.6f}")
+
+    # Forecast mit bestem Modell
+    pc_cols = [f"PC{i + 1}" for i in range(best_n_pcs)]
+    df_pcs_full = pd.concat([X_pca_train_df[pc_cols], X_pca_test_df[pc_cols]])
+    df_target_full = pd.concat([df_train[target_var], df_test[target_var]])
+    horizon = len(df_test)
+
+    forecast_results = []
+
+    for i in range(1, horizon + 1):
+        features = []
+        for lag in range(1, best_n_lags + 1):
+            y_lag = df_target_full.shift(i + lag - 1).rename(f"{target_var}_lag{lag}")
+            pcs_lag = df_pcs_full[pc_cols].shift(i + lag - 1)
+            pcs_lag.columns = [f"{col}_lag{lag}" for col in pc_cols]
+            features.append(y_lag)
+            features.append(pcs_lag)
+
+        X_train = pd.concat(features, axis=1)
+        y_train = df_target_full
+
+        valid = X_train.notnull().all(axis=1) & y_train.notnull()
+        X_valid = X_train[valid]
+        y_valid = y_train[valid]
+
+        if len(X_valid) < 30:
+            continue
+
+        model = LinearRegression().fit(X_valid, y_valid)
+
+        t_i_date = df_test.index[i - 1]
+
+        try:
+            X_input_vals = []
+            for lag in range(1, best_n_lags + 1):
+                offset = pd.DateOffset(months=3 * (i + lag - 1))
+                date_lookup = t_i_date - offset
+                y_val = df_target_full.loc[date_lookup]
+                pcs_val = df_pcs_full.loc[date_lookup, pc_cols]
+                if pd.isna(y_val) or pcs_val.isna().any():
+                    raise ValueError("Missing value")
+                X_input_vals.append(y_val)
+                X_input_vals.extend(pcs_val.tolist())
+        except:
+            continue
+
+        feature_names = []
+        for lag in range(1, best_n_lags + 1):
+            feature_names.append(f"{target_var}_lag{lag}")
+            feature_names.extend([f"{col}_lag{lag}" for col in pc_cols])
+
+        X_input_df = pd.DataFrame([X_input_vals], columns=feature_names)
+        y_hat = model.predict(X_input_df)[0]
+        forecast_results.append((t_i_date, i, y_hat))
+
+    forecast_df = pd.DataFrame(forecast_results, columns=["date", "horizon", "forecast"]).set_index("date")
+    y_true_final = df_test.loc[forecast_df.index, target_var].values
+    mse_final = mean_squared_error(y_true_final, forecast_df["forecast"].values)
+
+    final_forecasts[target_var] = {
+        "forecast_df": forecast_df,
+        "mse": mse_final,
+        "n_lags": best_n_lags,
+        "n_pcs": best_n_pcs
+    }
+
+    print(f"Final MSE ({target_var}): {mse_final:.6f}")
 
 # In[===== Bestes Modell (Train) =====]
 
-n_pcs = 16
 n_lags = 1
-target_var = "inflation"
-pc_cols = [f"PC{i + 1}" for i in range(n_pcs)]
+n_pcs = 16
+target_vars = ['inflation', 'g_gdpos', 'srate', 'lrate']
 
-# Kombinierte Daten
-df_pcs_full = pd.concat([X_pca_train_df[pc_cols], X_pca_test_df[pc_cols]])
-df_target_full = pd.concat([df_train[target_var], df_test[target_var]])
-horizon = len(df_test)
+forecast_results_dict = {}
 
-forecast_results = []
+for target_var in target_vars:
+    print(f"\n=== {target_var.upper()} ===")
 
-for i in range(1, horizon + 1):
-    lagged_features = []
+    pc_cols = [f"PC{i + 1}" for i in range(n_pcs)]
+    df_pcs_full = pd.concat([X_pca_train_df[pc_cols], X_pca_test_df[pc_cols]])
+    df_target_full = pd.concat([df_train[target_var], df_test[target_var]])
+    horizon = len(df_test)
 
-    for lag in range(1, n_lags + 1):
-        y_lag = df_target_full.shift(i + lag - 1).rename(f"{target_var}_lag{lag}")
-        pcs_lag = df_pcs_full[pc_cols].shift(i + lag - 1)
-        pcs_lag.columns = [f"{col}_lag{lag}" for col in pc_cols]
+    forecast_results = []
 
-        lagged_features.append(y_lag)
-        lagged_features.append(pcs_lag)
+    for i in range(1, horizon + 1):
+        lagged_features = []
 
-    X_train = pd.concat(lagged_features, axis=1)
-    y_train = df_target_full
-
-    valid = X_train.notnull().all(axis=1) & y_train.notnull()
-    X_valid = X_train[valid]
-    y_valid = y_train[valid]
-
-    if len(X_valid) < 30:
-        print(f"Skipping i={i}: only {len(X_valid)} valid observations.")
-        continue
-
-    model = LinearRegression().fit(X_valid, y_valid)
-
-    # Prognosezeitpunkt
-    t_i_date = df_test.index[i - 1]
-    offset_base = pd.DateOffset(months=3 * i)
-
-    try:
-        X_input_vals = []
         for lag in range(1, n_lags + 1):
-            offset = pd.DateOffset(months=3 * (i + lag - 1))
-            date_lookup = t_i_date - offset
-            y_val = df_target_full.loc[date_lookup]
-            pcs_val = df_pcs_full.loc[date_lookup, pc_cols]
-            if pd.isna(y_val) or pcs_val.isna().any():
-                raise ValueError("Missing value")
-            X_input_vals.append(y_val)
-            X_input_vals.extend(pcs_val.tolist())
-    except:
-        continue
+            y_lag = df_target_full.shift(i + lag - 1).rename(f"{target_var}_lag{lag}")
+            pcs_lag = df_pcs_full[pc_cols].shift(i + lag - 1)
+            pcs_lag.columns = [f"{col}_lag{lag}" for col in pc_cols]
+            lagged_features.append(y_lag)
+            lagged_features.append(pcs_lag)
 
-    feature_names = []
-    for lag in range(1, n_lags + 1):
-        feature_names.append(f"{target_var}_lag{lag}")
-        feature_names.extend([f"{col}_lag{lag}" for col in pc_cols])
+        X_train = pd.concat(lagged_features, axis=1)
+        y_train = df_target_full
 
-    X_input_df = pd.DataFrame([X_input_vals], columns=feature_names)
-    y_hat = model.predict(X_input_df)[0]
-    forecast_results.append((t_i_date, i, y_hat))
+        valid = X_train.notnull().all(axis=1) & y_train.notnull()
+        X_valid = X_train[valid]
+        y_valid = y_train[valid]
 
-# Ergebnis als DataFrame
-forecast_bhut_df = pd.DataFrame(
-    forecast_results,
-    columns=["date", "horizon", "forecast_custom"]
-).set_index("date")
+        if len(X_valid) < 30:
+            continue
 
-# Wahre Zielwerte
-true_inflation_values = df_test.loc[forecast_bhut_df.index, "inflation"].values
+        model = LinearRegression().fit(X_valid, y_valid)
 
-# Prognosen des spezifischen Modells (Bhut-Modell)
-forecast_bhut_predictions = forecast_bhut_df["forecast_custom"].values
+        t_i_date = df_test.index[i - 1]
 
-# MSE berechnen
-mse_bhut_model = mean_squared_error(true_inflation_values, forecast_bhut_predictions)
-print(f"Mean Squared Error (Bhut-Modell): {mse_bhut_model:.6f}")
+        try:
+            X_input_vals = []
+            for lag in range(1, n_lags + 1):
+                offset = pd.DateOffset(months=3 * (i + lag - 1))
+                date_lookup = t_i_date - offset
+                y_val = df_target_full.loc[date_lookup]
+                pcs_val = df_pcs_full.loc[date_lookup, pc_cols]
+                if pd.isna(y_val) or pcs_val.isna().any():
+                    raise ValueError("Missing value")
+                X_input_vals.append(y_val)
+                X_input_vals.extend(pcs_val.tolist())
+        except:
+            continue
+
+        feature_names = []
+        for lag in range(1, n_lags + 1):
+            feature_names.append(f"{target_var}_lag{lag}")
+            feature_names.extend([f"{col}_lag{lag}" for col in pc_cols])
+
+        X_input_df = pd.DataFrame([X_input_vals], columns=feature_names)
+        y_hat = model.predict(X_input_df)[0]
+        forecast_results.append((t_i_date, i, y_hat))
+
+    # Forecast-DataFrame
+    forecast_df = pd.DataFrame(
+        forecast_results,
+        columns=["date", "horizon", "forecast"]
+    ).set_index("date")
+
+    # Wahre Werte und MSE
+    y_true = df_test.loc[forecast_df.index, target_var].values
+    y_pred = forecast_df["forecast"].values
+    mse = mean_squared_error(y_true, y_pred)
+
+    print(f"MSE ({target_var}): {mse:.6f}")
+
+    # Speichern
+    forecast_results_dict[target_var] = {
+        "forecast_df": forecast_df,
+        "mse": mse
+    }
 
 
 # In[===== Plot3  =====]
 
-# Forecast-Werte aus Bhut-Modell ergänzen
-forecast_df.loc[forecast_bhut_df.index, "forecast_custom"] = forecast_bhut_df["forecast_custom"].values
-# Plot
-plt.figure(figsize=(12, 5))
+# Alle Zielvariablen, die im Dictionary forecast_results_dict gespeichert wurden
+for target_var in ['inflation', 'g_gdpos', 'srate', 'lrate']:
+    result = forecast_results_dict[target_var]
+    forecast_df = result["forecast_df"]
+    mse = result["mse"]
 
-# Wahre Werte
-plt.plot(forecast_df.index, forecast_df["y_true"], label="True Inflation", color="black")
+    # Wahre Werte zum Vergleich
+    y_true = df_test.loc[forecast_df.index, target_var]
 
-# Originalmodell: PCs + y_{t-1}
-plt.plot(forecast_df.index, forecast_df["y_pred"], label="Predicted (PCs + y_{t-1})", linestyle="--", color="orange")
+    # Plot
+    plt.figure(figsize=(12, 5))
+    plt.plot(y_true.index, y_true, label="True Values", color="black")
+    plt.plot(forecast_df.index, forecast_df["forecast"], label="Bhut-Model Forecast", linestyle="--", color="green")
 
-# AR(1)
-plt.plot(forecast_df.index, forecast_df["ar1_pred"], label="AR(1) Prediction", linestyle=":", color="blue")
+    plt.title(f"{target_var.upper()}: Bhut-Style Forecast vs. True | MSE = {mse:.4f}")
+    plt.xlabel("Zeit")
+    plt.ylabel(target_var)
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
 
-# AR(2)
-plt.plot(forecast_df.index, forecast_df["ar2_pred"], label="AR(2) Prediction", linestyle=":", color="purple")
 
-# Neues Modell: y_t ~ y_{t-i} + PCs_{t-i}, angewandt auf t+i
-plt.plot(forecast_df.index, forecast_df["forecast_custom"], label="Forecast: y_t ~ PCs + y_{t-i}", linestyle="-.", color="green")
 
-# Split-Linie
-plt.axvline(x=split_timestamp, color="red", linestyle="dotted", label="Train/Test Split")
+# In[===== PlotMSE  =====]
 
-# Formatierung
-plt.title("Forecast Comparison: AR(1), AR(2), PCs + y_{t-1}, and Bhut-Style Model y_{t-i}")
-plt.xlabel("Zeit")
-plt.ylabel("Inflation")
-plt.legend()
-plt.grid(True)
+
+# MSE-Tabelle vorbereiten
+mse_data = []
+
+for target_var in forecast_results_dict:
+    mse_bhut = forecast_results_dict[target_var]["mse"]
+    mse_ar1 = ar_results[target_var]["ar1"]["mse"]
+    mse_ar2 = ar_results[target_var]["ar2"]["mse"]
+
+    mse_data.append({
+        "target_var": target_var,
+        "Bhut-Model": mse_bhut,
+        "AR(1)": mse_ar1,
+        "AR(2)": mse_ar2
+    })
+
+mse_df = pd.DataFrame(mse_data)
+mse_df.set_index("target_var", inplace=True)
+
+# Plot 1: inflation & g_gdpos
+fig, axes = plt.subplots(1, 2, figsize=(12, 5), sharey=True)
+
+for idx, var in enumerate(["inflation", "g_gdpos"]):
+    mse_series = mse_df.loc[var]
+    axes[idx].bar(mse_series.index, mse_series.values, color=["green", "blue", "purple"])
+    axes[idx].set_title(f"{var.upper()}")
+    axes[idx].set_ylabel("Mean Squared Error")
+    axes[idx].set_xticks(range(len(mse_series.index)))
+    axes[idx].set_xticklabels(mse_series.index, rotation=45)
+    axes[idx].grid(True, axis="y")
+
+fig.suptitle("MSE Comparison: Inflation & g_gdpos", fontsize=14)
+plt.tight_layout()
+plt.show()
+
+# Plot 2: srate & lrate
+fig, axes = plt.subplots(1, 2, figsize=(12, 5), sharey=True)
+
+for idx, var in enumerate(["srate", "lrate"]):
+    mse_series = mse_df.loc[var]
+    axes[idx].bar(mse_series.index, mse_series.values, color=["green", "blue", "purple"])
+    axes[idx].set_title(f"{var.upper()}")
+    axes[idx].set_ylabel("Mean Squared Error")
+    axes[idx].set_xticks(range(len(mse_series.index)))
+    axes[idx].set_xticklabels(mse_series.index, rotation=45)
+    axes[idx].grid(True, axis="y")
+
+fig.suptitle("MSE Comparison: srate & lrate", fontsize=14)
 plt.tight_layout()
 plt.show()
