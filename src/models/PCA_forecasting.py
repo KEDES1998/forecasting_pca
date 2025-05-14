@@ -6,10 +6,10 @@ import matplotlib.pyplot as plt
 from sklearn.decomposition import PCA
 from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import StandardScaler
-
+from sklearn.metrics import mean_squared_error
 
 # In[===== 1) Parameter & Pfade =====]
-project_root = Path().resolve().parent.parent
+project_root = Path().resolve()
 processed_folder = project_root / "data" / "processed" / "test_train"
 TRAIN_DATA_PATH = processed_folder / "train_splits.xlsx"
 TEST_DATA_PATH = processed_folder / "test_splits.xlsx"
@@ -162,52 +162,176 @@ plt.legend()
 plt.tight_layout()
 plt.show()
 
-# In[===== Modellschätzung (Train) =====]
-horizon = len(df_test)
-n_pcs = 5
+# In[===== Selektion Bestes Modell (Train) =====]
+# Parameter
+# Parameter
+target_var = "inflation"
+max_lags = 5
+max_pcs =20
+
+# Vorbereitung
+results = []
+best_mse = float("inf")
+best_config = None
+
+for n_lags in range(1, max_lags + 1):
+    for n_pcs in range(1, max_pcs + 1):
+        pc_cols = [f"PC{i + 1}" for i in range(n_pcs)]
+        df_pcs_full = pd.concat([X_pca_train_df[pc_cols], X_pca_test_df[pc_cols]])
+        df_target_full = pd.concat([df_train[target_var], df_test[target_var]])
+        horizon = len(df_test)
+
+        preds, trues = [], []
+
+        for i in range(1, horizon + 1):
+            features = []
+
+            for lag in range(1, n_lags + 1):
+                y_lag = df_target_full.shift(i + lag - 1).rename(f"{target_var}_lag{lag}")
+                pcs_lag = df_pcs_full[pc_cols].shift(i + lag - 1)
+                pcs_lag.columns = [f"{col}_lag{lag}" for col in pc_cols]
+                features.append(y_lag)
+                features.append(pcs_lag)
+
+            X_train = pd.concat(features, axis=1)
+            y_train = df_target_full
+
+            valid = X_train.notnull().all(axis=1) & y_train.notnull()
+            X_valid = X_train[valid]
+            y_valid = y_train[valid]
+
+            if len(X_valid) < 30:
+                continue
+
+            model = LinearRegression().fit(X_valid, y_valid)
+
+            # Forecast: y_{t+i} using info at t
+            try:
+                t_i = df_test.index[i - 1]
+                X_input = []
+
+                for lag in range(1, n_lags + 1):
+                    lookup = t_i - pd.DateOffset(months=3 * (i + lag - 1))
+                    y_val = df_target_full.loc[lookup]
+                    pcs_val = df_pcs_full.loc[lookup, pc_cols]
+                    if pd.isna(y_val) or pcs_val.isna().any():
+                        raise ValueError
+                    X_input.append(y_val)
+                    X_input.extend(pcs_val.tolist())
+
+                feature_names = [f"{target_var}_lag{l}" for l in range(1, n_lags + 1)]
+                for l in range(1, n_lags + 1):
+                    feature_names += [f"{pc}_lag{l}" for pc in pc_cols]
+
+                X_pred_df = pd.DataFrame([X_input], columns=feature_names)
+                y_hat = model.predict(X_pred_df)[0]
+                y_true = df_target_full.loc[t_i]
+
+                preds.append(y_hat)
+                trues.append(y_true)
+
+            except:
+                continue
+
+        if preds and len(preds) == len(trues):
+            mse = mean_squared_error(trues, preds)
+            results.append((n_lags, n_pcs, mse))
+            if mse < best_mse:
+                best_mse = mse
+                best_config = (n_lags, n_pcs)
+
+# Output
+print(f"Best MSE: {best_mse:.6f} at n_lags={best_config[0]}, n_pcs={best_config[1]}")
+
+results_df = pd.DataFrame(results, columns=["n_lags", "n_pcs", "mse"])
+
+# In[===== Bestes Modell (Train) =====]
+
+n_pcs = 16
+n_lags = 1
 target_var = "inflation"
 pc_cols = [f"PC{i + 1}" for i in range(n_pcs)]
 
-# Combine PCs and target for alignment
-df_pcs = pd.concat([X_pca_train_df, X_pca_test_df])
-df_target = pd.concat([df_train[target_var], df_test[target_var]])
+# Kombinierte Daten
+df_pcs_full = pd.concat([X_pca_train_df[pc_cols], X_pca_test_df[pc_cols]])
+df_target_full = pd.concat([df_train[target_var], df_test[target_var]])
+horizon = len(df_test)
 
-forecast_dates = []
-forecast_values = []
+forecast_results = []
 
 for i in range(1, horizon + 1):
-    # Regressors: PCs and lagged target at time t
-    X = df_pcs.shift(i).copy()  # Use PCs at t = t+i - i = t
-    X[f"{target_var}_lag1"] = df_target.shift(i)
+    lagged_features = []
 
-    y = df_target
+    for lag in range(1, n_lags + 1):
+        y_lag = df_target_full.shift(i + lag - 1).rename(f"{target_var}_lag{lag}")
+        pcs_lag = df_pcs_full[pc_cols].shift(i + lag - 1)
+        pcs_lag.columns = [f"{col}_lag{lag}" for col in pc_cols]
 
-    valid = X.notnull().all(axis=1) & y.notnull()
-    X_valid = X[valid]
-    y_valid = y[valid]
+        lagged_features.append(y_lag)
+        lagged_features.append(pcs_lag)
+
+    X_train = pd.concat(lagged_features, axis=1)
+    y_train = df_target_full
+
+    valid = X_train.notnull().all(axis=1) & y_train.notnull()
+    X_valid = X_train[valid]
+    y_valid = y_train[valid]
 
     if len(X_valid) < 30:
-        print(f"Skipping i={i}: Only {len(X_valid)} valid observations.")
+        print(f"Skipping i={i}: only {len(X_valid)} valid observations.")
         continue
 
     model = LinearRegression().fit(X_valid, y_valid)
 
-    # Predict y_{t+i} using PCs_t and y_t
+    # Prognosezeitpunkt
     t_i_date = df_test.index[i - 1]
-    X_pred = X.loc[t_i_date].to_frame().T
-    y_pred = model.predict(X_pred)[0]
+    offset_base = pd.DateOffset(months=3 * i)
 
-    forecast_dates.append(t_i_date)
-    forecast_values.append(y_pred)
+    try:
+        X_input_vals = []
+        for lag in range(1, n_lags + 1):
+            offset = pd.DateOffset(months=3 * (i + lag - 1))
+            date_lookup = t_i_date - offset
+            y_val = df_target_full.loc[date_lookup]
+            pcs_val = df_pcs_full.loc[date_lookup, pc_cols]
+            if pd.isna(y_val) or pcs_val.isna().any():
+                raise ValueError("Missing value")
+            X_input_vals.append(y_val)
+            X_input_vals.extend(pcs_val.tolist())
+    except:
+        continue
+
+    feature_names = []
+    for lag in range(1, n_lags + 1):
+        feature_names.append(f"{target_var}_lag{lag}")
+        feature_names.extend([f"{col}_lag{lag}" for col in pc_cols])
+
+    X_input_df = pd.DataFrame([X_input_vals], columns=feature_names)
+    y_hat = model.predict(X_input_df)[0]
+    forecast_results.append((t_i_date, i, y_hat))
+
+# Ergebnis als DataFrame
+forecast_bhut_df = pd.DataFrame(
+    forecast_results,
+    columns=["date", "horizon", "forecast_custom"]
+).set_index("date")
+
+# Wahre Zielwerte
+true_inflation_values = df_test.loc[forecast_bhut_df.index, "inflation"].values
+
+# Prognosen des spezifischen Modells (Bhut-Modell)
+forecast_bhut_predictions = forecast_bhut_df["forecast_custom"].values
+
+# MSE berechnen
+mse_bhut_model = mean_squared_error(true_inflation_values, forecast_bhut_predictions)
+print(f"Mean Squared Error (Bhut-Modell): {mse_bhut_model:.6f}")
+
 
 # In[===== Plot3  =====]
 
-# Forecast-Ergebnisse aus Schleife als DataFrame
-forecast_custom_df = pd.DataFrame({
-    "forecast_custom": forecast_values
-}, index=forecast_dates)
-
-# Plot-Vergleich aller Modelle
+# Forecast-Werte aus Bhut-Modell ergänzen
+forecast_df.loc[forecast_bhut_df.index, "forecast_custom"] = forecast_bhut_df["forecast_custom"].values
+# Plot
 plt.figure(figsize=(12, 5))
 
 # Wahre Werte
@@ -222,16 +346,17 @@ plt.plot(forecast_df.index, forecast_df["ar1_pred"], label="AR(1) Prediction", l
 # AR(2)
 plt.plot(forecast_df.index, forecast_df["ar2_pred"], label="AR(2) Prediction", linestyle=":", color="purple")
 
-# Neues Modell: Für jedes i eigenes Modell mit y_{t-i}
-plt.plot(forecast_custom_df.index, forecast_custom_df["forecast_custom"], label="Forecast: y_t ~ PCs + y_{t-i}", linestyle="-.", color="green")
+# Neues Modell: y_t ~ y_{t-i} + PCs_{t-i}, angewandt auf t+i
+plt.plot(forecast_df.index, forecast_df["forecast_custom"], label="Forecast: y_t ~ PCs + y_{t-i}", linestyle="-.", color="green")
 
-# Split
+# Split-Linie
 plt.axvline(x=split_timestamp, color="red", linestyle="dotted", label="Train/Test Split")
 
 # Formatierung
-plt.title("Forecast Comparison: AR(1), AR(2), PCs + y_{t-1}, and Separate Models y_{t-i}")
+plt.title("Forecast Comparison: AR(1), AR(2), PCs + y_{t-1}, and Bhut-Style Model y_{t-i}")
 plt.xlabel("Zeit")
 plt.ylabel("Inflation")
 plt.legend()
+plt.grid(True)
 plt.tight_layout()
 plt.show()
