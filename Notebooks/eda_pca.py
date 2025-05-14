@@ -19,10 +19,6 @@ output_cdf = results_folder / "pca_cdf"
 output_heatmap = results_folder / "pca_heatmap"
 output_3d = results_folder / "pca_3d"
 
-
-for folder in [output_folder_pca, output_scree, output_top10, output_cdf, output_heatmap, output_3d]:
-    folder.mkdir(parents=True, exist_ok=True)
-
 # Read all sheets
 sheet_dict = pd.read_excel(input_excel, sheet_name=None)
 pca_results = {}
