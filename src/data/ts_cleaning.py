@@ -5,7 +5,6 @@ import matplotlib.pyplot as plt
 from statsmodels.tsa.stattools import adfuller
 from statsmodels.tsa.seasonal import STL
 import numpy as np
-from sklearn.preprocessing import StandardScaler
 import warnings
 
 warnings.filterwarnings(
@@ -168,17 +167,9 @@ df["inflation"] = 100 * df["inflation"]
 plot_economic_indicators(df, "date_parsed", dep_vars)
 plot_economic_indicators(df_diff, "date_parsed", dep_vars)
 
-# In[Scaling]
-
-scaler = StandardScaler()
-scaled_arr = scaler.fit_transform(df_diff)
-df_scaled = pd.DataFrame(scaled_arr, index=df_diff.index, columns=df_diff.columns)
-
-
 # In[Saving]
 
 df_diff.to_csv(processed_folder / 'cleaned_data.csv')
-df_scaled.to_csv(processed_folder / 'scaled_data.csv')
 
 
 # In[14]

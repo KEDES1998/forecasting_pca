@@ -1,17 +1,16 @@
 import pandas as pd
 from pathlib import Path
 import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
 from sklearn.decomposition import PCA
 import numpy as np
-import joblib
+from sklearn.preprocessing import StandardScaler
 
 # In[Setup]
 project_root = Path().resolve().parent
 print(f"Projektroot: {project_root}")
 
 processed_folder = project_root / "data" / "processed"
-input_excel = processed_folder / "test_train" / "train_splits.xlsx"
+input_excel = processed_folder / "test_train" / "train_splits_scaled.xlsx"
 results_folder = project_root / "results" / "figures"
 output_folder_pca = processed_folder / "pca_outputs"
 output_scree = results_folder / "pca_scree"
@@ -33,10 +32,12 @@ for sheet_name, df in sheet_dict.items():
     print(f"\nVerarbeite Sheet: {sheet_name}")
 
     # Prepare data
-    exclude_cols = {"year", "month", "quarter", "date", "date_parsed", "ngdp",
-                    "gdp_prod", "ngdpos", "pgdp", "gdpoi", "gdpos"}
+    exclude_cols = {"date_parsed"}
     relevant_cols = [col for col in df.columns if col not in exclude_cols]
-    X = df[relevant_cols]
+    X_temp = df[relevant_cols].dropna().values
+
+    scaler = StandardScaler()
+    X = scaler.fit_transform(X_temp)
 
     # PCA
     pca = PCA()
@@ -72,18 +73,24 @@ for sheet_name, df in sheet_dict.items():
     plt.close(fig)
 
     # CDF der ersten 20 Komponenten
+    max_plot = 20
+    n_components = len(cumulative_variance)
+    n_plot = min(max_plot, n_components)
+
     fig = plt.figure(figsize=(10, 5))
-    plt.plot(range(1, 21), cumulative_variance[:20], marker='o')
-    plt.title(f"Kumulative erklärte Varianz (1–20) – {sheet_name}")
+    plt.plot(range(1, n_plot + 1), cumulative_variance[:n_plot], marker='o')
+    plt.title(f"Kumulative erklärte Varianz (1–{n_plot}) – {sheet_name}")
     plt.xlabel("Hauptkomponenten")
     plt.ylabel("Kumulative erklärte Varianz")
-    plt.xticks(range(1, 21))
+    plt.xticks(range(1, n_plot + 1))
     plt.grid(True)
-    plt.text(0.95, -0.2,
-             f"Kumulative erklärte Varianz der ersten 20 Komponenten: {cumulative_variance[19]:.3f}",
-             transform=plt.gca().transAxes, fontsize=10, ha='right')
+    plt.text(
+        0.95, -0.2,
+        f"Kumulative erklärte Varianz der ersten {n_plot} Komponenten: {cumulative_variance[n_plot - 1]:.3f}",
+        transform=plt.gca().transAxes, fontsize=10, ha='right'
+    )
     plt.tight_layout()
-    fig.savefig(output_cdf / f"cdf_20_{sheet_name}.png")
+    fig.savefig(output_cdf / f"cdf_1-{n_plot}_{sheet_name}.png")
     plt.close(fig)
 
     # PC1-Zeitreihe (falls Datum dabei ist)
