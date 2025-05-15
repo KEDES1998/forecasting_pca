@@ -201,6 +201,6 @@ ax.legend()
 plt.tight_layout()
 
 # optional: speichern
-fig.savefig(OUTPUT_PATH_PLOTS /f'rmse_dfm[{STEPS}]_vs_ar({ORDER}).png')
+fig.savefig(OUTPUT_PATH_PLOTS /f'RMSE_dfm_vs_ar({ORDER})_H{STEPS}.png')
 plt.show()
 
