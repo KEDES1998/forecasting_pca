@@ -13,11 +13,14 @@ project_root = Path().resolve().parent.parent
 print(f"Projektroot: {project_root}")
 processed_folder = project_root / "data" / "processed"
 DATA_PATH = processed_folder / "cleaned_data.csv"
-STEPS = 1
+OUTPUT_PATH_PLOTS = project_root / "results" / "figures" / "forecast_plots" / "DFM"
+
+STEPS = 4       # Forecast Horizont
 K_FACTORS = 1   # Anzahl latenter Faktoren
-ORDER = 1       # Ordnung der AR-Dynamik im Faktor
+ORDER = 1       # AR-Dynamik -> AR(ORDER)
 MAXITER = 1000  # Max. Iterationen im Fit
 min_train_periods = 10   # train period
+MAX_HORIZON = 4
 
 # In[===== 2) Daten einlesen & vorbereiten =====]
 df = pd.read_csv(
@@ -91,13 +94,113 @@ print(metrics_compare)
 
 # 6) Plot
 for var in endog.columns:
-    plt.figure(figsize=(10, 4))
+    fig = plt.figure(figsize=(10, 4))
     plt.plot(endog.index, endog[var], label='Actual', color='black')
     plt.plot(pred_mean_exp.index, pred_mean_exp[var], label='DFM Forecast')
     plt.plot(pred_mean_ar.index, pred_mean_ar[var], label='AR(1) Forecast')
-    plt.title(f'Expanding-Window {STEPS}-Step Forecast für {var}')
+    plt.title(f'Expanding-Window {STEPS}-Step Forecast for {var}')
     plt.xlabel('Datum')
     plt.ylabel(var)
     plt.legend()
     plt.tight_layout()
+    fig.savefig(OUTPUT_PATH_PLOTS/ f"{STEPS}-Step Forecast for {var}_DFM.png")
     plt.show()
+
+################################################################
+#########################  RMSE Plots ##########################
+################################################################
+
+pred_index = endog.index[min_train_periods:]
+
+# Storage für alle Horizonte und beide Modelle
+preds_exp = {h: pd.DataFrame(index=pred_index, columns=endog.columns, dtype=float)
+             for h in range(1, MAX_HORIZON+1)}
+preds_ar  = {h: pd.DataFrame(index=pred_index, columns=endog.columns, dtype=float)
+             for h in range(1, MAX_HORIZON+1)}
+
+warnings.filterwarnings("ignore", category=ConvergenceWarning)
+
+# Expanding‐Window Loop über Zeitpunkte
+for i in range(min_train_periods, len(endog)):
+    train = endog.iloc[:i]
+    # 1) DynamicFactor Mehrschritt‐Forecast
+    mod_df = DynamicFactor(train, k_factors=K_FACTORS, factor_order=ORDER)
+    res_df = mod_df.fit(maxiter=MAXITER, disp=False)
+    fcast = res_df.get_forecast(steps=MAX_HORIZON).predicted_mean
+
+    for h in range(1, MAX_HORIZON+1):
+        # falls Horizon h verfügbar
+        if h <= fcast.shape[0]:
+            preds_exp[h].iloc[i-min_train_periods] = fcast.iloc[h-1].values
+
+    # 2) AR(1) Mehrschritt‐Forecast
+    for var in endog.columns:
+        series = train[var]
+        try:
+            model_ar = AutoReg(series, lags=1, old_names=False)
+            res_ar = model_ar.fit()
+            # dynamische Mehrschritt‐Prognose
+            fc_ar = res_ar.predict(start=len(series),
+                                   end=len(series)+MAX_HORIZON-1)
+            for h in range(1, MAX_HORIZON+1):
+                preds_ar[h].iloc[i-min_train_periods, preds_ar[h].columns.get_loc(var)] = fc_ar.iloc[h-1]
+        except Exception:
+            # fehlgeschlagene Prognose => NaN
+            preds_ar[h].loc[preds_ar[h].index[i-min_train_periods], var] = np.nan
+
+# 4) RMSE berechnen pro Horizon und Gesamt‐RMSE
+rmse_exp = []
+rmse_ar  = []
+for h in range(1, MAX_HORIZON+1):
+    # für dieses h alle Variablen und Zeitpunkte auf einen Vektor abflachen
+    y_true = []
+    y_e = []
+    y_a = []
+    for var in endog.columns:
+        idx = preds_exp[h].index
+        y_true.extend(endog[var].loc[idx].values)
+        y_e.extend(preds_exp[h][var].values)
+        y_a.extend(preds_ar[h][var].values)
+    # rechnen
+    rmse_exp.append(np.sqrt(mean_squared_error(y_true, y_e)))
+    rmse_ar.append( np.sqrt(mean_squared_error(y_true, y_a)) )
+
+# Gesamt‐RMSE über alle Horizonte
+y_true_all = []
+y_e_all    = []
+y_a_all    = []
+for h in range(1, MAX_HORIZON+1):
+    for var in endog.columns:
+        idx = preds_exp[h].index
+        y_true_all.extend(endog[var].loc[idx].values)
+        y_e_all.extend(preds_exp[h][var].values)
+        y_a_all.extend(preds_ar[h][var].values)
+total_rmse_exp = np.sqrt(mean_squared_error(y_true_all, y_e_all))
+total_rmse_ar  = np.sqrt(mean_squared_error(y_true_all, y_a_all))
+
+# Zusammenstellen ins DataFrame für Plot
+labels = ['Total'] + [f'{h}-Step' for h in range(1, MAX_HORIZON+1)]
+df_plot = pd.DataFrame({
+    'DFM': [total_rmse_exp] + rmse_exp,
+    'AR(1)': [total_rmse_ar] + rmse_ar
+}, index=labels)
+
+# 5) Balkendiagramm
+fig, ax = plt.subplots(figsize=(8,5))
+width = 0.35
+x = np.arange(len(df_plot.index))
+ax.bar(x - width/2, df_plot['DFM'], width, label='DynamicFactor')
+ax.bar(x + width/2, df_plot['AR(1)'], width, label='AR(1)')
+
+ax.set_xticks(x)
+ax.set_xticklabels(df_plot.index)
+ax.set_xlabel('Forecast Horizon')
+ax.set_ylabel('RMSE')
+ax.set_title('RMSE‐Comparison: Dynamic Factor vs. AR(1)')
+ax.legend()
+plt.tight_layout()
+
+# optional: speichern
+fig.savefig(OUTPUT_PATH_PLOTS /f'rmse_dfm[{STEPS}]_vs_ar({ORDER}).png')
+plt.show()
+
