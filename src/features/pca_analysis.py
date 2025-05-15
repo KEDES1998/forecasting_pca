@@ -6,7 +6,7 @@ import numpy as np
 from sklearn.preprocessing import StandardScaler
 
 # In[Setup]
-project_root = Path().resolve().parent
+project_root = Path().resolve().parent.parent
 print(f"Projektroot: {project_root}")
 
 processed_folder = project_root / "data" / "processed"
