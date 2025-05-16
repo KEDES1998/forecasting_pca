@@ -1,350 +1,258 @@
-# In[IMPORTS]
 import pandas as pd
 import numpy as np
-from pathlib import Path
 import matplotlib.pyplot as plt
 from sklearn.decomposition import PCA
-from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import mean_squared_error
-# In[===== 1) Parameter & Pfade =====]
-project_root = Path().resolve()
-processed_folder = project_root / "data" / "processed" / "test_train"
-TRAIN_DATA_PATH = processed_folder / "train_splits.xlsx"
-TEST_DATA_PATH = processed_folder / "test_splits.xlsx"
-# Originaldaten (nicht differenziert, nicht transformiert)
-ORIGINAL_DATA_PATH = project_root / "data" / "raw" / "Macro_series_FS25.xlsx"
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+import seaborn as sns
+from pathlib import Path
 
+# Pfade und Parameter definieren
+project_root = Path().resolve().parent.parent
+processed_folder = project_root / "data" / "processed"
+cleaned_data_path = processed_folder / 'cleaned_data.csv'
 
+# Daten laden
+df = pd.read_csv(cleaned_data_path, index_col=0, parse_dates=True)
+print(f"Datensatz geladen: {df.shape[0]} Zeilen, {df.shape[1]} Spalten")
+print("Variablen:", df.columns.tolist())
 
-group_number = 0
-split_number = 5
+# Fehlende Werte überprüfen und behandeln
+missing_values = df.isnull().sum()
+print("\nFehlende Werte pro Spalte:")
+print(missing_values)
 
-sheet_name_train = f"train_{group_number}_{split_number}"
-sheet_name_test = f"test_{group_number}_{split_number}"
+# Für dieses Beispiel füllen wir fehlende Werte auf
+# In einer realen Zeitreihenanalyse könntest du andere Methoden wie Interpolation verwenden
+df_filled = df.fillna(df.mean())
 
+# Die zu prognostizierenden Zielvariablen definieren
+target_vars = ["inflation", "g_gdpos"]
 
-# In[===== 2) Daten einlesen =====]
-# === Originaldaten einlesen ===
-# === 1) Originaldaten laden und vorbereiten ===
-df_raw = pd.read_excel(
-    ORIGINAL_DATA_PATH,
-    sheet_name=0,
-    header=None
-)
+# Überprüfen, ob diese Variablen im Datensatz vorhanden sind
+for var in target_vars:
+    if var not in df_filled.columns:
+        raise ValueError(f"Zielvariable '{var}' nicht im Datensatz gefunden!")
 
-# Erste Zeile als Spaltennamen verwenden
-df_raw.columns = ["date"] + df_raw.iloc[0, 1:].tolist()
-df_raw = df_raw.drop(index=0).reset_index(drop=True)
+# Feature-Set erstellen (alle Spalten außer den Zielvariablen)
+feature_vars = [col for col in df_filled.columns if col not in target_vars]
 
-# Nur Zeilen behalten mit Quartalsdatum (z. B. "2020 Q1")
-df_raw = df_raw[df_raw["date"].notna() & df_raw["date"].astype(str).str.contains("Q")]
+# Expanding Window Modell mit PCA
+# ==============================
 
-# Jahr und Quartal extrahieren
-df_raw["year"] = df_raw["date"].astype(str).str.split(" ").str[0].astype(int)
-df_raw["quarter"] = df_raw["date"].astype(str).str.split(" ").str[1]
-quarter_to_month = {"Q1": 1, "Q2": 4, "Q3": 7, "Q4": 10}
-df_raw["month"] = df_raw["quarter"].map(quarter_to_month)
-
-# Zeitstempel erzeugen
-df_raw["date_parsed"] = pd.to_datetime(df_raw[["year", "month"]].assign(day=1), errors="coerce")
-df_raw = df_raw.dropna(subset=["date_parsed"])
-
-# Numerische Umwandlung aller Spalten außer Datum
-for col in df_raw.columns:
-    if col not in {"date", "year", "quarter", "month", "date_parsed"}:
-        df_raw[col] = pd.to_numeric(df_raw[col], errors="coerce")
-
-# Finales DataFrame aufbauen
-df = df_raw.set_index("date_parsed").drop(columns=["date", "year", "quarter", "month"])
-df = df.asfreq("QS").dropna()
-
-# === 2) Log-Differenzierte Zielvariablen erzeugen ===
-if "cpi" not in df.columns or "gdpos" not in df.columns:
-    raise ValueError(f"Benötigte Spalten fehlen. Verfügbar: {df.columns.tolist()}")
-
-df["inflation"] = np.log(df["cpi"]).diff()
-df["g_gdpos"] = np.log(df["gdpos"]).diff()
-
-
-
-# === 3) Trainings- und Testdaten laden ===
-df_train = pd.read_excel(
-    TRAIN_DATA_PATH,
-    sheet_name=sheet_name_train,
-    parse_dates=['date_parsed']
-).set_index('date_parsed').asfreq('QS').dropna()
-
-df_test = pd.read_excel(
-    TEST_DATA_PATH,
-    sheet_name=sheet_name_test,
-    parse_dates=['date_parsed']
-).set_index('date_parsed').asfreq('QS').dropna()
-
-split_timestamp = df_test.index.min()
-
-# === 4) Vorbereitung für PCA: relevante Spalten extrahieren ===
-exclude_cols = {"date_parsed"}
-relevant_cols = [col for col in df_train.columns if col not in exclude_cols]
-
-PCAdf_train = df_train[relevant_cols]
-PCAdf_test = df_test[relevant_cols]
-
-scaler = StandardScaler()
-PCAdf_train_scaled = scaler.fit_transform(PCAdf_train)
-PCAdf_test_scaled = scaler.transform(PCAdf_test)
-
-# In[===== PCA (nur auf Train) =====]
-n_components = min(20, PCAdf_train.shape[0], PCAdf_train.shape[1])
-pca = PCA(n_components=n_components, svd_solver="full")
-X_pca_train = pca.fit_transform(PCAdf_train_scaled)
-X_pca_test  = pca.transform(PCAdf_test_scaled)
-
-X_pca_train_df = pd.DataFrame(X_pca_train, index=df_train.index, columns=[f"PC{i+1}" for i in range(n_components)])
-X_pca_test_df = pd.DataFrame(X_pca_test, index=df_test.index, columns=[f"PC{i+1}" for i in range(n_components)])
-
-
-# In[===== Forecasting Model (Train) =====]
-n_pcs = 5
-lags = 1
-PC_cols = [f"PC{i+1}" for i in range(n_pcs)]
-
-X_train = X_pca_train_df[PC_cols].copy()
-for i in range(1, lags + 1):
-    X_train[f"inflation_lag{i}"] = df_train["inflation"].shift(i)
-
-y_train = df_train["inflation"]
-valid_train = X_train.notnull().all(axis=1) & y_train.notnull()
-X_train_clean = X_train[valid_train]
-y_train_clean = y_train[valid_train]
-
-model = LinearRegression()
-model.fit(X_train_clean, y_train_clean)
-
-
-# In[===== Forecast auf vollen Zeitverlauf (Train + Test) =====]
-X_pca_full_df = pd.concat([X_pca_train_df, X_pca_test_df])
-df_full = pd.concat([df_train, df_test])
-
-X_full = X_pca_full_df[PC_cols].copy()
-for i in range(1, lags + 1):
-    X_full[f"inflation_lag{i}"] = df_full["inflation"].shift(i)
-
-y_full = df_full["inflation"]
-valid_full = X_full.notnull().all(axis=1) & y_full.notnull()
-X_full_clean = X_full[valid_full]
-y_full_clean = y_full[valid_full]
-
-y_full_pred = model.predict(X_full_clean)
-
-forecast_df = pd.DataFrame({
-    "y_true": y_full_clean.values,
-    "y_pred": y_full_pred
-}, index=X_full_clean.index)
-
-
-# In[===== Plot =====]
-plt.figure(figsize=(12, 5))
-plt.plot(forecast_df.index, forecast_df["y_true"], label="True Inflation", color="black")
-plt.plot(forecast_df.index, forecast_df["y_pred"], label="Predicted Inflation", linestyle="--", color="orange")
-plt.axvline(x=split_timestamp, color="red", linestyle="dotted", label="Train/Test Split")
-plt.title("Forecast: Train + Test (einfaches Modell)")
-plt.legend()
-plt.tight_layout()
-plt.show()
-
-
-# In[===== Bestes Modell (Train) =====]
-#scheint nicht skaliert zu sein
 # Parameter
-# === Parameter ===
-n_pcs = 16
-target_vars = ['inflation', 'g_gdpos', 'srate', 'lrate']
-min_obs = 30
-diff_vars = {"srate", "lrate"}
-pc_cols = [f"PC{i + 1}" for i in range(n_pcs)]
+initial_train_periods = 60  # Erste 60 Quartale als Trainingsdaten
+forecast_horizon = 1  # Ein Schritt voraus prognostizieren (kann angepasst werden)
+n_components = 0.95  # PCA-Komponenten, die 95% der Varianz erklären
 
-pcs_train = X_pca_train_df[pc_cols]
-pcs_full = pd.concat([X_pca_train_df[pc_cols], X_pca_test_df[pc_cols]])
-df_full = pd.concat([df_train, df_test])
-
-# === Modellschätzung ===
+# Ergebnisse speichern
 results = {}
-for target_var in target_vars:
-    y_train = df_train[target_var]
-    h = 1
-    model_infos = []
+for target in target_vars:
+    results[target] = {
+        'true_values': [],
+        'predictions': [],
+        'r2_scores': [],
+        'mse_scores': [],
+        'mae_scores': [],
+        'test_indices': []
+    }
 
-    while True:
-        y_lag = y_train.shift(h).rename(f"{target_var}_lag{h}")
-        pcs_lag = pcs_train.shift(h)
-        pcs_lag.columns = [f"{col}_lag{h}" for col in pc_cols]
-        X = pd.concat([y_lag, pcs_lag], axis=1)
-        y = y_train
+# DataFrame für PCA-Features vorbereiten
+X = df_filled[feature_vars]
+y_dict = {target: df_filled[target] for target in target_vars}
 
-        valid = X.notnull().all(axis=1) & y.notnull()
-        X_valid = X[valid]
-        y_valid = y[valid]
+# Scaler für Features vorbereiten
+scaler = StandardScaler()
 
-        if len(X_valid) < min_obs:
-            break
+# Expanding Window Loop
+for i in range(initial_train_periods, len(df_filled) - forecast_horizon + 1):
+    # Trainings- und Testdaten definieren
+    X_train = X.iloc[:i]
+    X_test = X.iloc[i:i + forecast_horizon]
 
-        model = LinearRegression().fit(X_valid, y_valid)
-        mse = mean_squared_error(y_valid, model.predict(X_valid))
+    # Skalieren der Trainingsdaten
+    scaler.fit(X_train)
+    X_train_scaled = scaler.transform(X_train)
+    X_test_scaled = scaler.transform(X_test)
 
-        model_infos.append({
-            "h": h,
-            "mse": mse,
-            "n_obs": len(X_valid),
-            "model": model,
-            "X_cols": X.columns.tolist(),
-            "X_valid": X_valid,
-            "y_valid": y_valid
-        })
+    # PCA auf Trainingsdaten anwenden
+    pca = PCA(n_components=n_components)
+    pca.fit(X_train_scaled)
 
-        h += 1
+    # PCA-transformierte Daten
+    X_train_pca = pca.transform(X_train_scaled)
+    X_test_pca = pca.transform(X_test_scaled)
 
-    results[target_var] = model_infos
+    # Nummer der verwendeten Komponenten und erklärte Varianz ausgeben
+    if i == initial_train_periods:
+        print(f"\nAnzahl PCA-Komponenten: {pca.n_components_}")
+        print(f"Erklärte Varianz: {sum(pca.explained_variance_ratio_):.4f}")
 
+    # Für jede Zielvariable ein Modell trainieren
+    for target in target_vars:
+        y_train = y_dict[target].iloc[:i]
+        y_test = y_dict[target].iloc[i:i + forecast_horizon]
 
-######=============================================######
-######===============  ALARMALARM  ===============######
-######===============  ALARMALARM  ===============######
-######===============  ALARMALARM  ===============######
-######=============================================######
+        # Modell trainieren
+        model = LinearRegression()
+        model.fit(X_train_pca, y_train)
 
+        # Vorhersage
+        y_pred = model.predict(X_test_pca)
 
-######=============================================######
-######===============  ALARMALARM  ===============######
-######===============  ALARMALARM  ===============######
-######===============  ALARMALARM  ===============######
-######=============================================######
+        # Ergebnisse speichern
+        results[target]['true_values'].extend(y_test.values)
+        results[target]['predictions'].extend(y_pred)
+        results[target]['test_indices'].extend(y_test.index)
 
+        # Metriken berechnen
+        r2 = r2_score(y_test, y_pred)
+        mse = mean_squared_error(y_test, y_pred)
+        mae = mean_absolute_error(y_test, y_pred)
 
+        results[target]['r2_scores'].append(r2)
+        results[target]['mse_scores'].append(mse)
+        results[target]['mae_scores'].append(mae)
 
+# Ergebnisse visualisieren
+# =======================
 
-# In[===== Plot3  =====]
+# Metrik-Evolution über die Zeit darstellen
+plt.figure(figsize=(18, 10))
 
-# Alle Zielvariablen, die im Dictionary forecast_results_dict gespeichert wurden
-for target_var in ['inflation', 'g_gdpos', 'srate', 'lrate']:
-    result = forecast_results_dict[target_var]
-    forecast_df = result["forecast_df"]
-    mse = result["mse"]
+for i, target in enumerate(target_vars):
+    # Indizes für x-Achse - die Testperioden
+    test_periods = range(initial_train_periods, len(df_filled) - forecast_horizon + 1)
 
-    # Wahre Werte zum Vergleich
-    y_true = df_test.loc[forecast_df.index, target_var]
-
-    # Plot
-    plt.figure(figsize=(12, 5))
-    plt.plot(y_true.index, y_true, label="True Values", color="black")
-    plt.plot(forecast_df.index, forecast_df["forecast"], label="Bhut-Model Forecast", linestyle="--", color="green")
-
-    plt.title(f"{target_var.upper()}: Bhut-Style Forecast vs. True | MSE = {mse:.4f}")
-    plt.xlabel("Zeit")
-    plt.ylabel(target_var)
+    # Subplot für R²
+    plt.subplot(2, 3, 1 + i * 3)
+    plt.plot(test_periods, results[target]['r2_scores'], marker='o')
+    plt.axhline(y=np.mean(results[target]['r2_scores']), color='r', linestyle='--',
+                label=f'Mittelwert: {np.mean(results[target]["r2_scores"]):.3f}')
+    plt.title(f'R² Evolution - {target}')
+    plt.xlabel('Testperiode')
+    plt.ylabel('R²')
     plt.legend()
     plt.grid(True)
-    plt.tight_layout()
-    plt.show()
 
+    # Subplot für MSE
+    plt.subplot(2, 3, 2 + i * 3)
+    plt.plot(test_periods, results[target]['mse_scores'], marker='o')
+    plt.axhline(y=np.mean(results[target]['mse_scores']), color='r', linestyle='--',
+                label=f'Mittelwert: {np.mean(results[target]["mse_scores"]):.3f}')
+    plt.title(f'MSE Evolution - {target}')
+    plt.xlabel('Testperiode')
+    plt.ylabel('MSE')
+    plt.legend()
+    plt.grid(True)
 
+    # Subplot für MAE
+    plt.subplot(2, 3, 3 + i * 3)
+    plt.plot(test_periods, results[target]['mae_scores'], marker='o')
+    plt.axhline(y=np.mean(results[target]['mae_scores']), color='r', linestyle='--',
+                label=f'Mittelwert: {np.mean(results[target]["mae_scores"]):.3f}')
+    plt.title(f'MAE Evolution - {target}')
+    plt.xlabel('Testperiode')
+    plt.ylabel('MAE')
+    plt.legend()
+    plt.grid(True)
 
-# In[===== PlotMSE  =====]
+plt.tight_layout()
+plt.suptitle('Evolution der Modellmetriken über alle Testperioden', fontsize=16)
+plt.subplots_adjust(top=0.9)
+plt.show()
 
+# Tatsächliche vs. prognostizierte Werte visualisieren
+plt.figure(figsize=(15, 10))
 
-# MSE-Tabelle vorbereiten
-mse_data = []
+for i, target in enumerate(target_vars):
+    plt.subplot(2, 1, i + 1)
 
-for target_var in forecast_results_dict:
-    mse_bhut = forecast_results_dict[target_var]["mse"]
-    mse_ar1 = ar_results[target_var]["ar1"]["mse"]
-    mse_ar2 = ar_results[target_var]["ar2"]["mse"]
+    # Zeitindex für den Plot erstellen
+    time_idx = results[target]['test_indices']
 
-    mse_data.append({
-        "target_var": target_var,
-        "Bhut-Model": mse_bhut,
-        "AR(1)": mse_ar1,
-        "AR(2)": mse_ar2
-    })
+    # Tatsächliche und prognostizierte Werte plotten
+    plt.plot(time_idx, results[target]['true_values'], 'b-', label='Tatsächliche Werte')
+    plt.plot(time_idx, results[target]['predictions'], 'r--', label='Prognosen')
 
-mse_df = pd.DataFrame(mse_data)
-mse_df.set_index("target_var", inplace=True)
+    plt.title(f'Prognose vs. tatsächliche Werte - {target}')
+    plt.xlabel('Datum')
+    plt.ylabel(target)
+    plt.legend()
+    plt.grid(True)
 
-# Plot 1: inflation & g_gdpos
-fig, axes = plt.subplots(1, 2, figsize=(12, 5), sharey=True)
+    # RMSE und MAE im Plot anzeigen
+    rmse = np.sqrt(np.mean(results[target]['mse_scores']))
+    mae = np.mean(results[target]['mae_scores'])
+    r2_mean = np.mean(results[target]['r2_scores'])
 
-for idx, var in enumerate(["inflation", "g_gdpos"]):
-    mse_series = mse_df.loc[var]
-    axes[idx].bar(mse_series.index, mse_series.values, color=["green", "blue", "purple"])
-    axes[idx].set_title(f"{var.upper()}")
-    axes[idx].set_ylabel("Mean Squared Error")
-    axes[idx].set_xticks(range(len(mse_series.index)))
-    axes[idx].set_xticklabels(mse_series.index, rotation=45)
-    axes[idx].grid(True, axis="y")
+    plt.annotate(f'RMSE: {rmse:.4f}\nMAE: {mae:.4f}\nR²: {r2_mean:.4f}',
+                 xy=(0.05, 0.9), xycoords='axes fraction',
+                 bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="gray", alpha=0.8))
 
-fig.suptitle("MSE Comparison: Inflation & g_gdpos", fontsize=14)
 plt.tight_layout()
 plt.show()
 
-# Plot 2: srate & lrate
-fig, axes = plt.subplots(1, 2, figsize=(12, 5), sharey=True)
+# Feature-Importance basierend auf den PCA-Komponenten analysieren
+# ===============================================================
 
-for idx, var in enumerate(["srate", "lrate"]):
-    mse_series = mse_df.loc[var]
-    axes[idx].bar(mse_series.index, mse_series.values, color=["green", "blue", "purple"])
-    axes[idx].set_title(f"{var.upper()}")
-    axes[idx].set_ylabel("Mean Squared Error")
-    axes[idx].set_xticks(range(len(mse_series.index)))
-    axes[idx].set_xticklabels(mse_series.index, rotation=45)
-    axes[idx].grid(True, axis="y")
+# PCA auf den gesamten Datensatz anwenden, um Feature-Importance zu berechnen
+X_scaled = scaler.fit_transform(X)
+final_pca = PCA(n_components=n_components)
+final_pca.fit(X_scaled)
 
-fig.suptitle("MSE Comparison: srate & lrate", fontsize=14)
+# Varianzanteil der einzelnen Komponenten
+explained_variance = final_pca.explained_variance_ratio_
+
+# PCA-Komponenten und Loadings visualisieren
+plt.figure(figsize=(14, 8))
+plt.bar(range(1, len(explained_variance) + 1), explained_variance, alpha=0.8)
+plt.step(range(1, len(explained_variance) + 1), np.cumsum(explained_variance), where='mid', color='red')
+plt.axhline(y=0.95, color='r', linestyle='--', label='95% Varianzgrenze')
+plt.xlabel('Hauptkomponenten')
+plt.ylabel('Erklärte Varianz')
+plt.title('Scree Plot: Erklärte Varianz durch Hauptkomponenten')
+plt.legend()
+plt.grid(True)
+plt.show()
+
+# Korrelationsmatrix zwischen Features und den wichtigsten PCA-Komponenten
+loadings = final_pca.components_
+n_top_components = min(5, loadings.shape[0])  # Max. 5 Komponenten anzeigen
+
+# Loadings als DataFrame für leichtere Handhabung
+loadings_df = pd.DataFrame(
+    loadings[:n_top_components].T,
+    index=feature_vars,
+    columns=[f'PC{i + 1} ({var:.2%})' for i, var in enumerate(explained_variance[:n_top_components])]
+)
+
+# Heatmap der Loadings
+plt.figure(figsize=(12, 10))
+sns.heatmap(loadings_df, annot=True, cmap='coolwarm', fmt='.2f', center=0)
+plt.title('Feature-Loadings der wichtigsten PCA-Komponenten')
 plt.tight_layout()
 plt.show()
 
+# Abschließende Statistiken und Zusammenfassung
+# ============================================
+print("\n===== Zusammenfassung der Modellperformance =====")
+for target in target_vars:
+    print(f"\nZielvariable: {target}")
+    print(f"Durchschnittliches R²: {np.mean(results[target]['r2_scores']):.4f}")
+    print(f"Durchschnittliches MSE: {np.mean(results[target]['mse_scores']):.4f}")
+    print(f"Durchschnittliches MAE: {np.mean(results[target]['mae_scores']):.4f}")
+    print(f"RMSE: {np.sqrt(np.mean(results[target]['mse_scores'])):.4f}")
 
+# Interpretation der wichtigsten PCA-Komponenten
+print("\n===== Interpretation der PCA-Komponenten =====")
+for i in range(min(3, loadings.shape[0])):  # Top 3 Komponenten
+    print(f"\nPC{i + 1} (erklärt {explained_variance[i]:.2%} der Varianz):")
 
+    # Sortiere Features nach absolutem Loading-Wert
+    sorted_loadings = sorted(zip(feature_vars, loadings[i]), key=lambda x: abs(x[1]), reverse=True)
 
-
-
-# In[===== 1) Rücktransform =====]
-
-diff_vars = {"srate", "lrate"}
-
-for var in target_vars:
-    forecast_df = forecast_results_dict[var]["forecast_df"]
-    forecast_diff = forecast_df["forecast"].values
-    forecast_index = forecast_df.index
-
-    if var in diff_vars:
-        last_train_date = forecast_index.min() - pd.DateOffset(months=3)
-        y0 = df[var].asof(last_train_date)  # Robust: nehme letzten bekannten Wert vor Forecast-Beginn
-        forecast_level = y0 + np.cumsum(forecast_diff)
-    else:
-        forecast_level = forecast_diff
-
-    # Forecast-Level als Series mit Index speichern
-    forecast_results_dict[var]["forecast_df"]["forecast_level"] = pd.Series(
-        forecast_level, index=forecast_index
-    )
-
-
-# In[===== 2) Plot: Forecast vs. Originaldaten (Differenz & Level) =====]
-for var in target_vars:
-    forecast_df = forecast_results_dict[var]["forecast_df"]
-
-    if "forecast_level" in forecast_df.columns:
-        forecast_level = forecast_df["forecast_level"]
-        original_series = df[var]
-
-        plt.figure(figsize=(12, 5))
-        plt.plot(original_series.index, original_series.values, label="Original Data (Level)", color="black")
-        plt.plot(forecast_level.index, forecast_level.values, label="Forecast (Level)", linestyle="--", color="green")
-        plt.axvline(x=forecast_level.index.min(), color="red", linestyle=":", label="Forecast-Beginn")
-        plt.title(f"{var.upper()}: Forecast Level vs. Original Data")
-        plt.xlabel("Zeit")
-        plt.ylabel(var)
-        plt.legend()
-        plt.grid(True)
-        plt.tight_layout()
-        plt.show()
+    # Top 5 einflussreichste Features
+    for feature, loading in sorted_loadings[:5]:
+        print(f"  {feature}: {loading:.4f}")
