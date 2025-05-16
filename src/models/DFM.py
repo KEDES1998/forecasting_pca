@@ -15,12 +15,14 @@ processed_folder = project_root / "data" / "processed"
 DATA_PATH = processed_folder / "cleaned_data.csv"
 OUTPUT_PATH_PLOTS = project_root / "results" / "figures" / "forecast_plots" / "DFM"
 
-STEPS = 4       # Forecast Horizont (Q)
+STEPS = 8       # Forecast Horizont (Q)
 K_FACTORS = 1   # Anzahl latenter Faktoren (Q)
 ORDER = 2       # AR-Dynamik -> AR(ORDER) (Q)
 MAXITER = 1000  # Max. Iterationen im Fit
 min_train_periods = 60   # train period
 MAX_HORIZON = 8
+
+AR_LAG = 1
 
 # In[===== 2) Daten einlesen & vorbereiten =====]
 df = pd.read_csv(
@@ -58,7 +60,7 @@ for i in range(min_train_periods, len(endog)):
     for var in endog.columns:
         series = train[var]
         try:
-            model_ar = AutoReg(series, lags=2, old_names=False)
+            model_ar = AutoReg(series, lags=AR_LAG, old_names=False)
             res_ar = model_ar.fit()
             # Vorhersage für den nächsten Zeitpunkt (ein Schritt)
             fc_ar = res_ar.predict(start=len(series), end=len(series))
@@ -81,13 +83,13 @@ for var in endog.columns:
 
 print("\nExpanding-Window One-Step-Ahead Forecast Accuracy (DynamicFactor):")
 print(metrics_exp)
-print("\nExpanding-Window One-Step-Ahead Forecast Accuracy (AR(2)):")
+print(f"\nExpanding-Window One-Step-Ahead Forecast Accuracy (AR({AR_LAG})):")
 print(metrics_ar)
 
 # 5) Vergleichsmatrix erstellen
 metrics_compare = pd.concat([
     metrics_exp.rename(columns=lambda c: f"DF_{c}"),
-    metrics_ar.rename(columns=lambda c: f"AR2_{c}")
+    metrics_ar.rename(columns=lambda c: f"AR{AR_LAG}_{c}")
 ], axis=1)
 print("\nForecast Accuracy Comparison:")
 print(metrics_compare)
@@ -97,7 +99,7 @@ for var in endog.columns:
     fig = plt.figure(figsize=(10, 4))
     plt.plot(endog.index, endog[var], label='Actual', color='black')
     plt.plot(pred_mean_exp.index, pred_mean_exp[var], label='DFM Forecast')
-    plt.plot(pred_mean_ar.index, pred_mean_ar[var], label='AR(2) Forecast')
+    plt.plot(pred_mean_ar.index, pred_mean_ar[var], label=f'AR({AR_LAG}) Forecast')
     plt.title(f'Expanding-Window {STEPS}-Step Forecast for {var}')
     plt.xlabel('Datum')
     plt.ylabel(var)
@@ -137,7 +139,7 @@ for i in range(min_train_periods, len(endog)):
     for var in endog.columns:
         series = train[var]
         try:
-            model_ar = AutoReg(series, lags=2, old_names=False)
+            model_ar = AutoReg(series, lags=AR_LAG, old_names=False)
             res_ar = model_ar.fit()
             # dynamische Mehrschritt‐Prognose
             fc_ar = res_ar.predict(start=len(series),
@@ -182,7 +184,7 @@ total_rmse_ar  = np.sqrt(mean_squared_error(y_true_all, y_a_all))
 labels = ['Total'] + [f'{h}-Step' for h in range(1, MAX_HORIZON+1)]
 df_plot = pd.DataFrame({
     'DFM': [total_rmse_exp] + rmse_exp,
-    'AR(2)': [total_rmse_ar] + rmse_ar
+    f'AR({AR_LAG})': [total_rmse_ar] + rmse_ar
 }, index=labels)
 
 # 5) RMSE‐Plots pro Variable
@@ -204,7 +206,7 @@ for var in endog.columns:
     # DataFrame für den Plot
     df_plot_var = pd.DataFrame({
         'DFM':    rmse_var_exp,
-        'AR(2)':  rmse_var_ar
+        f'AR({AR_LAG})':  rmse_var_ar
     }, index=[f'{h}-Step' for h in horizons])
 
     # Balkendiagramm erstellen
@@ -212,7 +214,7 @@ for var in endog.columns:
     x     = np.arange(len(df_plot_var.index))
     width = 0.35
     ax.bar(x - width/2, df_plot_var['DFM'],    width, label='DynamicFactor')
-    ax.bar(x + width/2, df_plot_var['AR(2)'],  width, label='AR(2)')
+    ax.bar(x + width/2, df_plot_var[f'AR({AR_LAG})'],  width, label=f'AR({AR_LAG})')
 
     ax.set_xticks(x)
     ax.set_xticklabels(df_plot_var.index)
@@ -223,6 +225,6 @@ for var in endog.columns:
     plt.tight_layout()
 
     # optional: speichern
-    fname = OUTPUT_PATH_PLOTS / f'RMSE_{var}_DFM_vs_AR2.png'
+    fname = OUTPUT_PATH_PLOTS / f'RMSE_{var}_DFM_vs_AR{AR_LAG}.png'
     fig.savefig(fname)
     plt.show()
