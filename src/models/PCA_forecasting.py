@@ -58,7 +58,7 @@ max_lag = 2 # Lags for AR
 initial_train_periods = 60 - max_lag
 forecast_horizon = 1
 n_components = 0.90  # PCA-Komponenten, that explain 95% of variance
-target_vars = ["inflation", "lrate"]
+target_vars = ["inflation", "g_gdpos", "srate", "lrate"]
 
 # In[Data loading]
 df = pd.read_csv(cleaned_data_path, index_col=0, parse_dates=True)
