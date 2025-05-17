@@ -15,6 +15,10 @@ processed_folder = project_root / "data" / "processed"
 DATA_PATH = processed_folder / "cleaned_data.csv"
 OUTPUT_PATH_PLOTS = project_root / "results" / "figures" / "forecast_plots" / "DFM"
 
+####################
+#### PARAMETER #####
+####################
+
 STEPS = 8       # Forecast Horizont (Q)
 K_FACTORS = 1   # Anzahl latenter Faktoren (Q)
 ORDER = 2       # AR-Dynamik -> AR(ORDER) (Q)
@@ -44,7 +48,10 @@ pred_mean_exp = pd.DataFrame(index=pred_index, columns=endog.columns, dtype=floa
 # DataFrame für AR(1)-Forecasts
 pred_mean_ar  = pd.DataFrame(index=pred_index, columns=endog.columns, dtype=float)
 
-# 3) Expanding-Window Loop
+#######################################
+#### EXPANDING WINDOW DFM FORECAST ####
+#######################################
+
 for i in range(min_train_periods, len(endog)):
     train = endog.iloc[:i]
     t_next = endog.index[i]
@@ -56,7 +63,7 @@ for i in range(min_train_periods, len(endog)):
     pm_df = fcast_df.predicted_mean.iloc[0]
     pred_mean_exp.loc[t_next] = pm_df.values
 
-    # 3.2) AR(1)-Modell für jede Variable
+    #### AR() ####
     for var in endog.columns:
         series = train[var]
         try:
@@ -68,16 +75,16 @@ for i in range(min_train_periods, len(endog)):
         except Exception:
             pred_mean_ar.loc[t_next, var] = np.nan
 
-# 4) Forecast-Accuracy berechnen
+# 4) Forecast-Accuracy
 metrics_exp = pd.DataFrame(index=endog.columns, columns=['RMSE'], dtype=float)
 metrics_ar  = pd.DataFrame(index=endog.columns, columns=['RMSE'], dtype=float)
 
 for var in endog.columns:
     y_true = endog[var].loc[pred_mean_exp.index]
-    # DynamicFactor
+    #### EXPANDING WINDOW DFM  ####
     y_pred_df = pred_mean_exp[var]
     metrics_exp.loc[var, 'RMSE'] = np.sqrt(mean_squared_error(y_true, y_pred_df))
-    # AR(1)
+    #### AR() ####
     y_pred_ar = pred_mean_ar[var]
     metrics_ar.loc[var, 'RMSE'] = np.sqrt(mean_squared_error(y_true, y_pred_ar))
 
@@ -94,19 +101,32 @@ metrics_compare = pd.concat([
 print("\nForecast Accuracy Comparison:")
 print(metrics_compare)
 
-# 6) Plot
+################################################################
+#######################  FORECAST PLOTS ########################
+################################################################
+
 for var in endog.columns:
     fig = plt.figure(figsize=(10, 4))
-    plt.plot(endog.index, endog[var], label='Actual', color='black')
-    plt.plot(pred_mean_exp.index, pred_mean_exp[var], label='DFM Forecast')
-    plt.plot(pred_mean_ar.index, pred_mean_ar[var], label=f'AR({AR_LAG}) Forecast')
+    # Forecast-Kurven
+    plt.plot(pred_mean_exp.index, pred_mean_exp[var],
+             label='DFM Forecast', color='red', linestyle='dashed')
+    plt.plot(pred_mean_ar.index, pred_mean_ar[var],
+             label=f'AR({AR_LAG}) Forecast', color='blue', linestyle='dashed')
+    # Actual nur ab Forecast-Beginn
+    forecast_start = pred_mean_exp.index.min()
+    actual_fc = endog.loc[forecast_start:, var]
+    plt.plot(actual_fc.index, actual_fc.values,
+             label='Actual', color='black')
+
     plt.title(f'Expanding-Window {STEPS}-Step Forecast for {var}')
     plt.xlabel('Datum')
     plt.ylabel(var)
     plt.legend()
+    plt.grid(True)
     plt.tight_layout()
-    fig.savefig(OUTPUT_PATH_PLOTS/ f"{STEPS}-Step Forecast for {var}_DFM.png")
+    fig.savefig(OUTPUT_PATH_PLOTS / f"{STEPS}-Step Forecast for {var}_DFM.png")
     plt.show()
+
 
 ################################################################
 #########################  RMSE Plots ##########################
@@ -222,6 +242,7 @@ for var in endog.columns:
     ax.set_ylabel('RMSE')
     ax.set_title(f'RMSE‐Comparison for Variable "{var}"')
     ax.legend(loc= "center right")
+    plt.grid(True)
     plt.tight_layout()
 
     # optional: speichern
