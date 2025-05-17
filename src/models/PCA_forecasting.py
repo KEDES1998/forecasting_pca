@@ -18,6 +18,12 @@ warnings.filterwarnings(
     message=r".*Series\.__getitem__ treating keys as positions is deprecated.*"
 )
 
+warnings.filterwarnings(
+    "ignore",
+    category=FutureWarning,
+    message=r".*SDataFrame.fillna with 'method' is deprecated and will raise in a future version. Use obj.ffill() or obj.bfill() instead.*"
+)
+
 # 2) UserWarnings from statsmodels about unsupported Index types
 warnings.filterwarnings(
     "ignore",
@@ -42,6 +48,7 @@ warnings.filterwarnings(
 project_root = Path().resolve().parent.parent
 processed_folder = project_root / "data" / "processed"
 cleaned_data_path = processed_folder / 'cleaned_data.csv'
+OUTPUT_PATH_PLOTS = project_root / "results" / "figures" / "forecast_plots" / "PCA"
 
 ####################
 #### PARAMETER #####
@@ -51,9 +58,9 @@ max_lag = 2 # Lags for AR
 initial_train_periods = 60 - max_lag
 forecast_horizon = 1
 n_components = 0.90  # PCA-Komponenten, that explain 95% of variance
-target_vars = ["inflation", "g_gdpos"]
+target_vars = ["inflation", "lrate"]
 
-# Daten laden
+# In[Data loading]
 df = pd.read_csv(cleaned_data_path, index_col=0, parse_dates=True)
 print(f"Datensatz geladen: {df.shape[0]} Zeilen, {df.shape[1]} Spalten")
 print("Variablen:", df.columns.tolist())
@@ -63,10 +70,9 @@ df_filled = df.fillna(method='ffill').fillna(method='bfill')
 
 # Feature-Set erstellen (alle Spalten außer den Zielvariablen)
 feature_vars = [col for col in df_filled.columns if col not in target_vars]
-
 df_with_lags = df_filled.copy()
 
-#In[Creating Lags]
+# In[Creating Lags]
 for target in target_vars:
     for lag in range(1, max_lag + 1):
         lag_name = f"{target}_lag{lag}"
@@ -76,8 +82,9 @@ for target in target_vars:
 # Removing first lagged rows
 df_with_lags = df_with_lags.iloc[max_lag:]
 
-# Expanding Window with PCA and AR
-# ============================================
+#######################################
+#### EXPANDING WINDOW PCA FORCAST #####
+#######################################
 
 # Saving results
 results = {}
@@ -125,16 +132,16 @@ for i in range(initial_train_periods, len(df_with_lags) - forecast_horizon + 1):
         y_train = y_dict[target].iloc[:i]
         y_test = y_dict[target].iloc[i:i + forecast_horizon]
 
-        # print("XXXXXXXXXXXXXXXXXXX IMPUT AUTOREG -> Y_TRAIN " + str(len(y_train)))
+        # print("XXXXXXXXXXXXXXXXXXX INPUT AUTOREG -> Y_TRAIN " + str(len(y_train)))
 
         # AutoReg Modell
         model = AutoReg(y_train, lags=max_lag, exog=X_train_pca)
         fit_model = model.fit()
 
-        # Vorhersage mit exogenen Variablen
+        # Prediction with exogenous variables
         y_pred = fit_model.forecast(steps=forecast_horizon, exog=X_test_pca)
 
-        # Ergebnisse speichern
+        # Saving results
         results[target]['true_values'].extend(y_test.values)
         results[target]['predictions'].extend(y_pred)
         results[target]['test_indices'].extend(y_test.index)
@@ -177,43 +184,41 @@ for i in range(initial_train_periods, len(df_with_lags) - forecast_horizon + 1):
                 for feature, loading in sorted_loadings[:5]:
                     print(f"  {feature}: {loading:.4f}")
 
-# Result visualisation
-# =======================
+####################
+###### PLOTS #######
+####################
 
-# Metrik-Evolution über die Zeit darstellen
-plt.figure(figsize=(18, 10))
+################ RMSE Evolution ##################
 
 for i, target in enumerate(target_vars):
-    # Indizes für x-Achse - die Testperioden
+    fig = plt.figure(figsize=(10, 4))
+    # Indizes x-axis testperiod
     test_periods = range(initial_train_periods, len(df_with_lags) - forecast_horizon + 1)
 
-    # Subplot für MSE
-    plt.subplot(2, 3, 2 + i * 3)
     plt.plot(test_periods, results[target]['rmse_scores'], marker='o')
     plt.axhline(y= np.mean(results[target]['rmse_scores']), color='r', linestyle='--',
                 label=f'Mittelwert: {np.mean(results[target]["rmse_scores"]):.3f}')
-    plt.title(f'RMSE Evolution - {target}')
+    plt.title(f'RMSE Evolution (Testperiod)- {target}')
     plt.xlabel('Test period')
     plt.ylabel('RMSE')
     plt.legend()
     plt.grid(True)
 
-plt.tight_layout()
-plt.suptitle('Evolution of RMSE for testperiod', fontsize=16)
-plt.subplots_adjust(top=0.9)
-plt.show()
+    fig.savefig(OUTPUT_PATH_PLOTS / f"{target}-RMSE_evo.png")
+    plt.tight_layout()
+    plt.show()
 
-# Tatsächliche vs. prognostizierte Werte visualisieren
-plt.figure(figsize=(15, 10))
+################ Prediction Plot ##################
 
 for i, target in enumerate(target_vars):
-    plt.subplot(2, 1, i + 1)
+
+    fig = plt.figure(figsize=(10, 4))
 
     # Zeitindex für den Plot erstellen
     time_idx = results[target]['test_indices']
 
     # Tatsächliche und prognostizierte Werte plotten
-    plt.plot(time_idx, results[target]['true_values'], 'b-', label='Tatsächliche Werte')
+    plt.plot(time_idx, results[target]['true_values'],label='Tatsächliche Werte', color='black')
     plt.plot(time_idx, results[target]['predictions'], 'r--', label='Prognosen')
 
     plt.title(f'Prognose vs. tatsächliche Werte - {target}')
@@ -223,22 +228,23 @@ for i, target in enumerate(target_vars):
     plt.grid(True)
 
     # RMSE und MAE im Plot anzeigen
-    rmse = np.sqrt(np.mean(results[target]['rmse_scores']))
+    rmse = np.mean(results[target]['rmse_scores'])
 
     plt.annotate(f'RMSE: {rmse:.4f}',
                  xy=(0.05, 0.9), xycoords='axes fraction',
                  bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="gray", alpha=0.8))
 
-plt.tight_layout()
-plt.show()
+    fig.savefig(OUTPUT_PATH_PLOTS / f"{target}-pred_pca.png")
+    plt.tight_layout()
+    plt.show()
 
 
-# Abschließende Statistiken und Zusammenfassung
+################# Model Summary ##################
 print("\n===== Zusammenfassung der Modellperformance =====")
 for target in target_vars:
     print(f"\nZielvariable: {target}")
     print("\n\n")
-    print(f"Durchschnittliches MSE: {np.sqrt(np.mean(results[target]['rmse_scores'])):.4f}")
+    print(f"Durchschnittliches RMSE: {np.mean(results[target]['rmse_scores']):.4f}")
 
 
 # Analyse der wichtigsten Features für die Prognose
