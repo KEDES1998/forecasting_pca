@@ -60,6 +60,9 @@ forecast_horizon = 1
 n_components = 0.90  # PCA-Komponenten, that explain 95% of variance
 target_vars = ["inflation", "g_gdpos", "srate", "lrate"]
 
+AR_ORDER = 1
+MAX_HORIZON = 8
+
 # In[Data loading]
 df = pd.read_csv(cleaned_data_path, index_col=0, parse_dates=True)
 print(f"Datensatz geladen: {df.shape[0]} Zeilen, {df.shape[1]} Spalten")
@@ -271,3 +274,226 @@ for target in target_vars:
     # Top 10 wichtigste Features ausgeben
     for feature, importance in sorted_features[:10]:
         print(f"  {feature}: {importance:.4f}")
+
+#########################
+######### AR() ##########
+#########################
+
+preds_pca = {h: {t: [] for t in target_vars}
+             for h in range(1, MAX_HORIZON+1)}
+preds_ar = {h: {t: [] for t in target_vars}
+             for h in range(1, MAX_HORIZON+1)}
+
+
+# AR(1) Forecasts zusätzlich vorbereiten
+ar_forecasts = {}
+
+for target in target_vars:
+    y_full = df_with_lags[target].values
+    ar_predictions = []
+
+    for i in range(initial_train_periods, len(df_with_lags) - forecast_horizon + 1):
+        y_train = y_full[:i]
+        model_ar = AutoReg(y_train, lags=AR_ORDER, old_names=False)
+        fit_ar = model_ar.fit()
+        y_pred_ar = fit_ar.forecast(steps=forecast_horizon)
+        ar_predictions.extend(y_pred_ar)
+
+    ar_forecasts[target] = ar_predictions
+
+
+for i, target in enumerate(target_vars):
+
+    fig = plt.figure(figsize=(10, 4))
+
+    time_idx = results[target]['test_indices']
+
+    plt.plot(time_idx, results[target]['true_values'], color = "black", label='time series', linestyle='-')
+    plt.plot(time_idx, results[target]['predictions'], 'r--', label='PCA AR')
+    plt.plot(time_idx, ar_forecasts[target], color = "blue", label=f'AR {AR_ORDER}', linestyle='--')
+
+    plt.title(f'Target Variable - {target}')
+    plt.xlabel('date')
+    plt.ylabel(target)
+    plt.legend()
+    plt.grid(True)
+
+    rmse = np.sqrt(np.mean(results[target]['rmse_scores']))
+    rmse_ar = root_mean_squared_error(results[target]['true_values'], ar_forecasts[target])
+
+    plt.annotate(f'RMSE PCA AR: {rmse:.4f}', xy=(0.05, 0.88), xycoords='axes fraction',
+                 bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="gray", alpha=0.8))
+    plt.annotate(f'RMSE AR {AR_ORDER}: {rmse_ar:.4f}',
+                xy=(0.05, 0.80), xycoords='axes fraction',
+                bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="gray", alpha=0.8))
+
+    fig.tight_layout()
+    fig.savefig(OUTPUT_PATH_PLOTS / f"forecast_{target}_comparison_ar{AR_ORDER}.png", dpi=300)
+    plt.show()
+
+##############################################################
+### RMSE Horizon Comparison Plot (PCA-AR vs AR) ###
+##############################################################
+
+# We need to generate forecasts for multiple horizons first
+# For both PCA-AR and AR models
+
+# Dictionary to store RMSE values for different horizons
+rmse_by_horizon = {
+    'PCA-AR': {t: [] for t in target_vars},
+    'AR': {t: [] for t in target_vars}
+}
+
+# Loop through each horizon
+for horizon in range(1, MAX_HORIZON + 1):
+    print(f"Computing forecasts for horizon h={horizon}...")
+
+    # For each target variable
+    for target in target_vars:
+        y_full = df_with_lags[target].values
+        pca_predictions = []
+        ar_predictions = []
+        true_values = []
+
+        # Use expanding window approach
+        for i in range(initial_train_periods, len(df_with_lags) - horizon + 1):
+            # Training data up to point i
+            X_train = X.iloc[:i]
+            y_train = y_full[:i]
+
+            # Test point is i + horizon - 1
+            if i + horizon <= len(df_with_lags):
+                true_values.append(y_full[i + horizon - 1])
+
+                # PCA-AR model
+                # Standardize features
+                scaler = StandardScaler()
+                X_train_scaled = scaler.fit_transform(X_train)
+
+                # Apply PCA
+                pca = PCA(n_components=n_components)
+                X_train_pca = pca.fit_transform(X_train_scaled)
+
+                # Fit AR model with PCA components
+                model_pca = AutoReg(y_train, lags=max_lag, exog=X_train_pca)
+                fit_pca = model_pca.fit()
+
+                # For multi-step forecasts, we need to forecast step by step
+                # For simplicity, we'll use a direct forecasting approach here
+                # This is a simplification - in practice, you might want recursive forecasting
+                if horizon == 1:
+                    # One-step forecast - use the last X_test directly
+                    X_test = X.iloc[i:i + 1]
+                    X_test_scaled = scaler.transform(X_test)
+                    X_test_pca = pca.transform(X_test_scaled)
+                    y_pred_pca = fit_pca.forecast(steps=1, exog=X_test_pca)
+                else:
+                    # Direct h-step forecast - train model to predict h steps ahead
+                    # This is simplified - in a full implementation you'd use a more sophisticated approach
+                    y_train_h = y_full[:(i - horizon + 1)]  # Shift target to create direct h-step predictions
+                    if len(y_train_h) > max_lag + 5:  # Ensure enough data
+                        model_pca_h = AutoReg(y_train_h, lags=max_lag, exog=X_train_pca[:len(y_train_h)])
+                        fit_pca_h = model_pca_h.fit()
+                        X_test = X.iloc[i:i + 1]
+                        X_test_scaled = scaler.transform(X_test)
+                        X_test_pca = pca.transform(X_test_scaled)
+                        y_pred_pca = fit_pca_h.forecast(steps=1, exog=X_test_pca)
+                    else:
+                        # Fall back to a simpler approach if not enough data
+                        y_pred_pca = [y_train[-1]]  # Use last value as prediction
+
+                pca_predictions.append(y_pred_pca[0])
+
+                # Simple AR model
+                model_ar = AutoReg(y_train, lags=AR_ORDER, old_names=False)
+                fit_ar = model_ar.fit()
+
+                if horizon == 1:
+                    y_pred_ar = fit_ar.forecast(steps=1)
+                else:
+                    # Simplified multi-step forecasting for AR model
+                    y_pred_ar = fit_ar.forecast(steps=horizon)
+
+                ar_predictions.append(y_pred_ar[-1])  # Take the last prediction (h-step ahead)
+
+        # Calculate RMSE for this horizon and target
+        if true_values and pca_predictions and ar_predictions:
+            rmse_pca = root_mean_squared_error(true_values, pca_predictions)
+            rmse_ar = root_mean_squared_error(true_values, ar_predictions)
+
+            rmse_by_horizon['PCA-AR'][target].append(rmse_pca)
+            rmse_by_horizon['AR'][target].append(rmse_ar)
+
+# Now create the bar chart comparison for each target variable
+for target in target_vars:
+    fig = plt.figure(figsize=(12, 6))
+    bar_width = 0.35
+    horizons = list(range(1, MAX_HORIZON + 1))
+    x = np.arange(len(horizons))
+
+    # Create bars
+    bars1 = plt.bar(x - bar_width / 2, rmse_by_horizon['PCA-AR'][target],
+                    bar_width, label='PCA-AR', color='darkred', alpha=0.8)
+    bars2 = plt.bar(x + bar_width / 2, rmse_by_horizon['AR'][target],
+                    bar_width, label=f'AR({AR_ORDER})', color='darkblue', alpha=0.8)
+
+    # Add improvement percentages
+    for i, h in enumerate(horizons):
+        pca_rmse = rmse_by_horizon['PCA-AR'][target][i]
+        ar_rmse = rmse_by_horizon['AR'][target][i]
+        improvement = ((ar_rmse - pca_rmse) / ar_rmse) * 100
+
+        # Only add text if significant improvement
+        if abs(improvement) > 1:
+            y_pos = min(pca_rmse, ar_rmse) - 0.03 * max(pca_rmse, ar_rmse)
+            color = 'green' if improvement > 0 else 'red'
+            label = f"{improvement:.1f}%" if improvement > 0 else f"{-improvement:.1f}%"
+
+            plt.text(i, y_pos, label, ha='center', color=color, fontweight='bold', fontsize=8)
+
+
+    # Add value labels on top of bars
+    def add_labels(bars):
+        for bar in bars:
+            height = bar.get_height()
+            plt.text(bar.get_x() + bar.get_width() / 2., height * 1.02,
+                     f'{height:.3f}', ha='center', va='bottom', fontsize=8)
+
+
+    add_labels(bars1)
+    add_labels(bars2)
+
+    # Labels and title
+    plt.xlabel('Forecast Horizon (h)')
+    plt.ylabel('RMSE')
+    plt.title(f'RMSE by Forecast Horizon: {target}')
+    plt.xticks(x, horizons)
+    plt.legend(loc='upper left')
+
+    # Add a horizontal grid for better readability
+    plt.grid(axis='y', linestyle='--', alpha=0.7)
+
+    plt.tight_layout()
+    plt.savefig(OUTPUT_PATH_PLOTS / f"rmse_horizon_comparison_{target}.png", dpi=300)
+    plt.show()
+
+# Create a summary table of RMSE values across horizons
+print("\n===== RMSE by Horizon Comparison Summary =====")
+for target in target_vars:
+    print(f"\nTarget: {target}")
+    print(f"{'Horizon':<8} {'PCA-AR':<10} {'AR(' + str(AR_ORDER) + ')':<10} {'Improvement':<10}")
+    print("-" * 45)
+
+    for h in range(1, MAX_HORIZON + 1):
+        idx = h - 1
+        if idx < len(rmse_by_horizon['PCA-AR'][target]) and idx < len(rmse_by_horizon['AR'][target]):
+            pca_rmse = rmse_by_horizon['PCA-AR'][target][idx]
+            ar_rmse = rmse_by_horizon['AR'][target][idx]
+            improvement = ((ar_rmse - pca_rmse) / ar_rmse) * 100
+
+            improvement_str = f"{improvement:.2f}%" if improvement > 0 else f"{improvement:.2f}%"
+            print(f"h = {h:<5} {pca_rmse:.4f}    {ar_rmse:.4f}    {improvement_str}")
+        else:
+            print(f"h = {h:<5} No data available")
+
+print("\nPositive improvement percentage means PCA-AR outperforms AR model")
