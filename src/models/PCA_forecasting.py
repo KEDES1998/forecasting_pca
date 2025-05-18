@@ -205,7 +205,7 @@ for i, target in enumerate(target_vars):
     plt.xlabel('Test period')
     plt.ylabel('RMSE')
     plt.legend()
-    plt.grid(True)
+
 
     fig.savefig(OUTPUT_PATH_PLOTS / f"{target}-RMSE_evo.png")
     plt.tight_layout()
@@ -286,7 +286,7 @@ for i, target in enumerate(target_vars):
     plt.xlabel('date')
     plt.ylabel(target)
     plt.legend()
-    plt.grid(True)
+
 
     rmse = np.sqrt(np.mean(results[target]['rmse_scores']))
     rmse_ar = root_mean_squared_error(results[target]['true_values'], ar_forecasts[target])
