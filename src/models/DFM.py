@@ -19,7 +19,7 @@ OUTPUT_PATH_PLOTS = project_root / "results" / "figures" / "forecast_plots" / "D
 #### PARAMETER #####
 ####################
 
-STEPS = 8       # Forecast Horizont (Q)
+STEPS = 1       # Forecast Horizont (Q)
 K_FACTORS = 1   # Anzahl latenter Faktoren (Q)
 ORDER = 2       # AR-Dynamik -> AR(ORDER) (Q)
 MAXITER = 1000  # Max. Iterationen im Fit
@@ -209,43 +209,72 @@ df_plot = pd.DataFrame({
 
 # 5) RMSE‐Plots pro Variable
 horizons = list(range(1, MAX_HORIZON+1))
-# für jede Variable einzeln
+
+
+def add_labels(bars):
+    for bar in bars:
+        h = bar.get_height()
+        ax.text(
+            bar.get_x() + bar.get_width() / 2,
+            h * 1.02,
+            f'{h:.3f}',
+            ha='center',
+            va='bottom',
+            fontsize=8
+        )
+
 for var in endog.columns:
     # RMSE‐Listen initialisieren
-    rmse_var_exp = []
+    rmse_var_dfm = []
     rmse_var_ar  = []
-    # für jeden Forecast‐Horizon berechnen
     for h in horizons:
         idx = preds_exp[h].index
         y_true = endog[var].loc[idx]
-        y_e    = preds_exp[h][var]
-        y_a    = preds_ar[h][var]
-        rmse_var_exp.append(np.sqrt(mean_squared_error(y_true, y_e)))
+        y_d = preds_exp[h][var]
+        y_a = preds_ar[h][var]
+        rmse_var_dfm.append(np.sqrt(mean_squared_error(y_true, y_d)))
         rmse_var_ar.append(np.sqrt(mean_squared_error(y_true, y_a)))
 
-    # DataFrame für den Plot
-    df_plot_var = pd.DataFrame({
-        'DFM':    rmse_var_exp,
-        f'AR({AR_LAG})':  rmse_var_ar
-    }, index=[f'{h}-Step' for h in horizons])
-
-    # Balkendiagramm erstellen
-    fig, ax = plt.subplots(figsize=(8,5))
-    x     = np.arange(len(df_plot_var.index))
+    # Plot vorbereiten
+    fig, ax = plt.subplots(figsize=(12, 6))
+    x     = np.arange(len(horizons))
     width = 0.35
-    ax.bar(x - width/2, df_plot_var['DFM'],    width, label='DynamicFactor')
-    ax.bar(x + width/2, df_plot_var[f'AR({AR_LAG})'],  width, label=f'AR({AR_LAG})')
 
+    # Balken zeichnen
+    bars1 = ax.bar(x - width/2, rmse_var_dfm,
+                   width, label='DynamicFactor', color='darkred', alpha=0.8)
+    bars2 = ax.bar(x + width/2, rmse_var_ar,
+                   width, label=f'AR({AR_LAG})', color='darkblue', alpha=0.8)
+
+    # Verbesserungs-Prozente annotieren
+    for i in range(len(horizons)):
+        dfm_rmse = rmse_var_dfm[i]
+        ar_rmse  = rmse_var_ar[i]
+        improvement = ((ar_rmse - dfm_rmse) / ar_rmse) * 100
+
+        if abs(improvement) > 1:  # nur signifikante Unterschiede
+            # Position unterhalb des kleineren Balkens
+            y_pos = min(dfm_rmse, ar_rmse) - 0.03 * max(dfm_rmse, ar_rmse)
+            color = 'green' if improvement > 0 else 'red'
+            label = f"{improvement:.1f}%"
+            ax.text(i, y_pos, label, ha='center', color=color,
+                    fontweight='bold', fontsize=8)
+
+    add_labels(bars1)
+    add_labels(bars2)
+
+    # Achsen, Titel und Grid
     ax.set_xticks(x)
-    ax.set_xticklabels(df_plot_var.index)
-    ax.set_xlabel('Forecast Horizon')
+    ax.set_xticklabels([f'{h}-Step' for h in horizons])
+    ax.set_xlabel('Forecast Horizon (h)')
     ax.set_ylabel('RMSE')
-    ax.set_title(f'RMSE‐Comparison for Variable "{var}"')
-    ax.legend(loc= "center right")
-    plt.grid(True)
+    ax.set_title(f'RMSE‐Comparison für Variable "{var}"')
+    ax.legend(loc='center right')
+    ax.grid(axis='y', linestyle='--', alpha=0.7)
+
     plt.tight_layout()
 
-    # optional: speichern
+    # Speichern und anzeigen
     fname = OUTPUT_PATH_PLOTS / f'RMSE_{var}_DFM_vs_AR{AR_LAG}.png'
-    fig.savefig(fname)
+    fig.savefig(fname, dpi=300)
     plt.show()

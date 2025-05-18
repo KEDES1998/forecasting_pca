@@ -97,11 +97,11 @@ for target in target_vars:
         'predictions': [],
         'rmse_scores': [],
         'test_indices': [],
-        'coefficients': [],  # Für jede Periode die Koeffizienten speichern
-        'pca_loadings': []  # Für jede Periode die PCA-Loadings speichern
+        'coefficients': [],
+        'pca_loadings': []
     }
 
-# DataFrame für PCA-Features und Zielvariablen vorbereiten
+# DF for pca features and target vars
 X = df_with_lags[feature_vars]
 y_dict = {target: df_with_lags[target] for target in target_vars}
 
@@ -111,33 +111,33 @@ for i in range(initial_train_periods, len(df_with_lags) - forecast_horizon + 1):
     X_train = X.iloc[:i]
     X_test = X.iloc[i:i + forecast_horizon]
 
-    # Skalieren der Trainingsdaten
+    # scale
     scaler = StandardScaler()
     scaler.fit(X_train)
     X_train_scaled = scaler.transform(X_train)
     X_test_scaled = scaler.transform(X_test)
 
-    # PCA auf Trainingsdaten anwenden (ohne Information aus Testdaten!)
+    # PCA ON TRAINIGDATA !!!
     pca = PCA(n_components=n_components)
     pca.fit(X_train_scaled)
 
-    # PCA-transformierte Daten
+    # PCA-transformed data
     X_train_pca = pca.transform(X_train_scaled)
     X_test_pca = pca.transform(X_test_scaled)
 
-    # Nummer der verwendeten Komponenten und erklärte Varianz ausgeben
+    # No of used pca's adn variance explained
     if i == initial_train_periods:
         print(f"\nAnzahl PCA-Komponenten: {pca.n_components_}")
         print(f"Erklärte Varianz: {sum(pca.explained_variance_ratio_):.4f}")
 
-    # Für jede Zielvariable ein Modell trainieren
+    # modell fpr each targetr var
     for target in target_vars:
         y_train = y_dict[target].iloc[:i]
         y_test = y_dict[target].iloc[i:i + forecast_horizon]
 
         # print("XXXXXXXXXXXXXXXXXXX INPUT AUTOREG -> Y_TRAIN " + str(len(y_train)))
 
-        # AutoReg Modell
+        # (PCA) AutoReg Modell
         model = AutoReg(y_train, lags=max_lag, exog=X_train_pca)
         fit_model = model.fit()
 
@@ -211,37 +211,6 @@ for i, target in enumerate(target_vars):
     plt.tight_layout()
     plt.show()
 
-################ Prediction Plot ##################
-
-for i, target in enumerate(target_vars):
-
-    fig = plt.figure(figsize=(10, 4))
-
-    # Zeitindex für den Plot erstellen
-    time_idx = results[target]['test_indices']
-
-    # Tatsächliche und prognostizierte Werte plotten
-    plt.plot(time_idx, results[target]['true_values'],label='Tatsächliche Werte', color='black')
-    plt.plot(time_idx, results[target]['predictions'], 'r--', label='Prognosen')
-
-    plt.title(f'Prognose vs. tatsächliche Werte - {target}')
-    plt.xlabel('Datum')
-    plt.ylabel(target)
-    plt.legend()
-    plt.grid(True)
-
-    # RMSE und MAE im Plot anzeigen
-    rmse = np.mean(results[target]['rmse_scores'])
-
-    plt.annotate(f'RMSE: {rmse:.4f}',
-                 xy=(0.05, 0.9), xycoords='axes fraction',
-                 bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="gray", alpha=0.8))
-
-    fig.savefig(OUTPUT_PATH_PLOTS / f"{target}-pred_pca.png")
-    plt.tight_layout()
-    plt.show()
-
-
 ################# Model Summary ##################
 print("\n===== Zusammenfassung der Modellperformance =====")
 for target in target_vars:
@@ -250,28 +219,28 @@ for target in target_vars:
     print(f"Durchschnittliches RMSE: {np.mean(results[target]['rmse_scores']):.4f}")
 
 
-# Analyse der wichtigsten Features für die Prognose
+# Analysis of the most important features
 print("\n===== Wichtigste Features für die Prognose =====")
 for target in target_vars:
     print(f"\nFür {target}:")
 
-    # Letztes Modell analysieren
+    # Last modell analysis
     last_coefs = results[target]['coefficients'][-1]
     last_loadings = results[target]['pca_loadings'][-1]
 
-    # Gewicht jedes Features berechnen (Kombination von PCA-Loadings und Koeffizienten)
+    # calculation importance of each feature
     feature_importance = np.zeros(len(feature_vars))
 
     for i, coef in enumerate(last_coefs):
         if i < len(last_loadings):  # Sicherstellen, dass wir nur gültige Indizes verwenden
             feature_importance += abs(coef) * abs(last_loadings[i])
 
-    # Features nach Wichtigkeit sortieren
+    # sort after importance
     sorted_features = [(feature, importance)
                        for feature, importance in zip(feature_vars, feature_importance)]
     sorted_features.sort(key=lambda x: x[1], reverse=True)
 
-    # Top 10 wichtigste Features ausgeben
+    # Top 10 Features
     for feature, importance in sorted_features[:10]:
         print(f"  {feature}: {importance:.4f}")
 
@@ -285,7 +254,7 @@ preds_ar = {h: {t: [] for t in target_vars}
              for h in range(1, MAX_HORIZON+1)}
 
 
-# AR(1) Forecasts zusätzlich vorbereiten
+# AR(1) Forecasts PREP
 ar_forecasts = {}
 
 for target in target_vars:
@@ -301,6 +270,7 @@ for target in target_vars:
 
     ar_forecasts[target] = ar_predictions
 
+################ Prediction Plot ##################
 
 for i, target in enumerate(target_vars):
 
@@ -328,7 +298,7 @@ for i, target in enumerate(target_vars):
                 bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="gray", alpha=0.8))
 
     fig.tight_layout()
-    fig.savefig(OUTPUT_PATH_PLOTS / f"forecast_{target}_comparison_ar{AR_ORDER}.png", dpi=300)
+    fig.savefig(OUTPUT_PATH_PLOTS / f"PCA_forecast_{target}_comparison_ar{AR_ORDER}.png", dpi=300)
     plt.show()
 
 ##############################################################
@@ -337,6 +307,12 @@ for i, target in enumerate(target_vars):
 
 # We need to generate forecasts for multiple horizons first
 # For both PCA-AR and AR models
+
+def add_labels(bars):
+    for bar in bars:
+        height = bar.get_height()
+        plt.text(bar.get_x() + bar.get_width() / 2., height * 1.02,
+                 f'{height:.3f}', ha='center', va='bottom', fontsize=8)
 
 # Dictionary to store RMSE values for different horizons
 rmse_by_horizon = {
@@ -450,15 +426,6 @@ for target in target_vars:
             label = f"{improvement:.1f}%" if improvement > 0 else f"{-improvement:.1f}%"
 
             plt.text(i, y_pos, label, ha='center', color=color, fontweight='bold', fontsize=8)
-
-
-    # Add value labels on top of bars
-    def add_labels(bars):
-        for bar in bars:
-            height = bar.get_height()
-            plt.text(bar.get_x() + bar.get_width() / 2., height * 1.02,
-                     f'{height:.3f}', ha='center', va='bottom', fontsize=8)
-
 
     add_labels(bars1)
     add_labels(bars2)
